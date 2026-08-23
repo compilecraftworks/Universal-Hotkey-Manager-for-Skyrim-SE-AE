@@ -126,6 +126,9 @@ namespace
     std::atomic_bool g_modalInputActive{ false };
     std::atomic_bool g_cancelActivePopupRequested{ false };
     std::atomic_bool g_renderWindowVisible{ false };
+    // Set whenever UHM is opened outside an already-focused Menu Framework
+    // entry.  The next render frame explicitly gives the ImGui window focus.
+    std::atomic_bool g_focusWindowOnNextRender{ false };
     std::atomic_bool g_suppressWindowCloseUntilEscapeRelease{ false };
     std::atomic_int64_t g_suppressWindowCloseUntilMilliseconds{ 0 };
     bool g_escapeConsumedByPopupThisFrame{};
@@ -2799,6 +2802,9 @@ namespace
             ImGui::SetNextWindowPos(ImVec2(io->DisplaySize.x * 0.5F, io->DisplaySize.y * 0.5F),
                 ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
         }
+        if (g_focusWindowOnNextRender.exchange(false)) {
+            ImGui::SetNextWindowFocus();
+        }
         // Reaching this callback is itself authoritative evidence that Menu
         // Framework is presenting the UHM window.  Some framework builds lag
         // WindowInterface::IsOpen by one frame, so seeding `open` from that
@@ -3613,9 +3619,10 @@ namespace
         ImGui::TextWrapped("%s", UiText("Open the manager here if its configured keyboard shortcut is unavailable.",
             "설정한 키보드 단축키를 사용할 수 없을 때 여기서 관리 창을 여세요.",
             "如果设定的键盘快捷键不可用，请在此打开管理窗口。"));
-        if (ImGui::Button(UiText("Open shortcut manager", "단축키 관리 열기", "打开快捷键管理器")) && g_window) {
+        if (ImGui::Button(UiText("Universal Hotkey Manager", "Universal Hotkey Manager", "Universal Hotkey Manager")) && g_window) {
             g_automaticRefreshRequestedForCurrentOpen = false;
             g_renderWindowVisible = true;
+            g_focusWindowOnNextRender = true;
             g_window->IsOpen = true;
         }
     }
@@ -3673,9 +3680,11 @@ namespace UHI
                 SavePendingPreferences();
             } else {
                 g_automaticRefreshRequestedForCurrentOpen = false;
+                g_focusWindowOnNextRender = true;
             }
             g_window->IsOpen = !wasOpen;
             g_renderWindowVisible = !wasOpen;
+            if (wasOpen) g_focusWindowOnNextRender = false;
             return true;
         }
         return false;
@@ -3685,6 +3694,7 @@ namespace UHI
     {
         if (!g_window || (!g_window->IsOpen.load() && !g_renderWindowVisible.load())) return false;
         g_renderWindowVisible = false;
+        g_focusWindowOnNextRender = false;
         g_openingHotkeyCaptureActive = false;
         g_visibleChangedHotkeyNotice = 0U;
         CloseEditorModal();

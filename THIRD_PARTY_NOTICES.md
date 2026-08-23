@@ -1,6 +1,6 @@
 # Third-party notices
 
-Universal Hotkey Manager for Skyrim SE-AE 1.0.2 is licensed under GPL-3.0-or-later and built with the following open-source components. The Release ZIP includes the full project `LICENSE` and the component license texts under `ThirdPartyLicenses/`. Complete corresponding source is published at <https://github.com/compilecraftworks/Universal-Hotkey-Manager-for-Skyrim-SE-AE> under the tag matching the binary version.
+Universal Hotkey Manager for Skyrim SE-AE 1.0.3 is licensed under GPL-3.0-or-later and built with the following open-source components. The Release ZIP includes the full project `LICENSE` and the component license texts under `ThirdPartyLicenses/`. Complete corresponding source is published at <https://github.com/compilecraftworks/Universal-Hotkey-Manager-for-Skyrim-SE-AE> under the tag matching the binary version.
 
 - CommonLibSSE-NG - MIT License - <https://github.com/CharmedBaryon/CommonLibSSE-NG>
 - fmt - MIT License - <https://github.com/fmtlib/fmt>

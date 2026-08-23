@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.3 - 2026-08-23
+
+- Fixed direct opening-shortcut ownership: UHM now performs its Menu Framework open/close transition on Skyrim's UI task queue, consumes the toggle input, and requests first-frame ImGui focus. This prevents the manager from appearing without cursor or input focus when opened outside the Menu Framework panel.
+- Kept the Menu Framework recovery entry available and renamed its button to **Universal Hotkey Manager**.
+
 ## 1.0.2 - 2026-08-23
 
 - Fixed Escape ownership, popup routing, and input blocking so editors close without saving, UHM closes independently, and Skyrim's system menu does not open underneath it.

@@ -4,7 +4,7 @@ Universal Hotkey Manager for Skyrim SE-AE is an ESP-free Skyrim SE/AE SKSE plugi
 
 ## Current status
 
-Version `1.0.2` provides an on-demand, four-stage scanner and native Menu Framework UI. UHM never traverses the mod tree during plugin/game loading. Press `Del` to open the window, then start the scan explicitly.
+Version `1.0.3` provides an on-demand, four-stage scanner and native Menu Framework UI. UHM never traverses the mod tree during plugin/game loading. Press `Del` to open the window, then start the scan explicitly.
 
 The manager opens large on first use and remains freely resizable. Its tabs are ordered as **Overview**, the purpose categories (**Game, Environment, Character, Combat, SexLab when installed, Interface, External Tools**), and **Options** last. Overview summarizes conflicts and editability and displays the keyboard, mouse, and gamepad maps. Options places the start/cancel controls and live four-stage Scanner at the top, followed by the overall text-size and opening-shortcut controls. A validated previous-scan snapshot is restored automatically and is visibly marked as previous data until the user refreshes it.
 
@@ -119,7 +119,7 @@ After a successful scan, UHM writes `UniversalHotkeyManager/reports/hotkeys.json
 
 Universal Hotkey Manager for Skyrim SE-AE is free software licensed under the **GNU General Public License version 3 or later (GPL-3.0-or-later)**. The complete license is included as `LICENSE`.
 
-Beginning with version 1.0.2, Nexus receives the MO2-ready **Release ZIP only**. The complete corresponding source, build scripts, version history, and notices are published at <https://github.com/compilecraftworks/Universal-Hotkey-Manager-for-Skyrim-SE-AE>. Use the Git tag matching the binary version (for example, `v1.0.2`) or GitHub's source archive for that tag. The Release ZIP still contains `LICENSE`, `THIRD_PARTY_NOTICES.md`, and every required third-party license text under `ThirdPartyLicenses/`.
+Beginning with version 1.0.2, Nexus receives the MO2-ready **Release ZIP only**. The complete corresponding source, build scripts, version history, and notices are published at <https://github.com/compilecraftworks/Universal-Hotkey-Manager-for-Skyrim-SE-AE>. Use the Git tag matching the binary version (for example, `v1.0.3`) or GitHub's source archive for that tag. The Release ZIP still contains `LICENSE`, `THIRD_PARTY_NOTICES.md`, and every required third-party license text under `ThirdPartyLicenses/`.
 
 The packaged `mouse.png` and `gamepad.png` are original line-art assets drawn specifically for UHM. They do not copy or redistribute artwork from another mod and are covered by the same GPL-3.0-or-later project license.
 

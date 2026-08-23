@@ -71,6 +71,10 @@ namespace
     std::atomic<std::uint8_t> g_uiLanguage{
         static_cast<std::uint8_t>(UHI::UiLanguage::automatic) };
     std::atomic_bool g_openingHotkeyPollStarted{ false };
+    // Opening from the focused-window fallback happens on its own polling
+    // thread.  Keep the actual Menu Framework state change on SKSE's UI task
+    // queue and coalesce the input event + polling fallback into one request.
+    std::atomic_bool g_openingTogglePending{ false };
     std::atomic_bool g_uhmPauseOwned{ false };
     std::atomic_int64_t g_lastOpeningToggleMilliseconds{ -1000 };
     std::atomic_bool g_hasValidatedScanSnapshot{ false };
@@ -462,11 +466,44 @@ namespace
         do {
             if (now - previous < 250) return false;
         } while (!g_lastOpeningToggleMilliseconds.compare_exchange_weak(previous, now));
+
+        if (g_openingTogglePending.exchange(true)) return false;
         const auto hotkey = GetOpeningHotkey();
-        const bool toggled = UHI::ToggleMenuFrameworkWindow();
-        SKSE::log::info("Opening hotkey {} received via {}; Menu Framework window toggle {}",
-            UHI::FormatOpeningHotkey(hotkey), source, toggled ? "succeeded" : "failed");
-        return toggled;
+        const std::string sourceText(source);
+        const auto completeToggle = [hotkey, sourceText] {
+            // A popup or the opening-key capture may have taken ownership in
+            // the frame between the input event and this queued UI task.
+            if (UHI::IsMenuFrameworkModalInputActive() ||
+                UHI::IsMenuFrameworkOpeningHotkeyCaptureActive()) {
+                g_openingTogglePending = false;
+                return;
+            }
+            const bool toggled = UHI::ToggleMenuFrameworkWindow();
+            g_openingTogglePending = false;
+            SKSE::log::info("Opening hotkey {} received via {}; Menu Framework window toggle {}",
+                UHI::FormatOpeningHotkey(hotkey), sourceText, toggled ? "succeeded" : "failed");
+        };
+
+        // Menu Framework owns ImGui input on the UI thread.  Calling its
+        // WindowInterface from an input sink or the asynchronous key polling
+        // thread can render the window while missing its first focus/input
+        // handoff on some Framework builds.  Always marshal normal openings
+        // through SKSE's UI queue instead.
+        if (const auto tasks = SKSE::GetTaskInterface()) {
+            try {
+                tasks->AddUITask(completeToggle);
+                return true;
+            } catch (const std::exception& error) {
+                g_openingTogglePending = false;
+                SKSE::log::error("Unable to queue UHM opening toggle: {}", error.what());
+                return false;
+            }
+        }
+
+        // This fallback is only relevant during abnormal early startup when
+        // SKSE has not exposed its task interface yet.
+        completeToggle();
+        return true;
     }
 
 #ifdef _WIN32
@@ -2209,9 +2246,13 @@ namespace
                         leftCtrlDown_, rightCtrlDown_) &&
                     ModifierMatches(openingHotkey.shift, openingHotkey.shiftScanCode,
                         leftShiftDown_, rightShiftDown_) &&
-                    ModifierMatches(openingHotkey.alt, openingHotkey.altScanCode,
+                        ModifierMatches(openingHotkey.alt, openingHotkey.altScanCode,
                         leftAltDown_, rightAltDown_)) {
                     ToggleOpeningWindow("Skyrim input event");
+                    // Do not leak the UHM toggle press into Skyrim or another
+                    // input sink.  That could open a game menu or let a
+                    // second handler claim focus in the same frame.
+                    return RE::BSEventNotifyControl::kStop;
                 }
             }
             return RE::BSEventNotifyControl::kContinue;
