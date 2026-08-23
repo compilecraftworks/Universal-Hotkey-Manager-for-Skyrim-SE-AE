@@ -43,39 +43,7 @@ namespace
 
     UHI::UiLanguage EffectiveUiLanguage() noexcept
     {
-        const auto configured = g_uiLanguage.load();
-        if (configured != UHI::UiLanguage::automatic) return configured;
-#ifdef _WIN32
-        const auto fromLanguageId = [](const LANGID language) -> std::optional<UHI::UiLanguage> {
-            switch (PRIMARYLANGID(language)) {
-            case LANG_KOREAN: return UHI::UiLanguage::korean;
-            case LANG_CHINESE: return UHI::UiLanguage::chinese;
-            case LANG_ENGLISH: return UHI::UiLanguage::english;
-            default: return std::nullopt;
-            }
-        };
-        const auto fromLocaleName = [](const wchar_t* locale) -> std::optional<UHI::UiLanguage> {
-            if (!locale || !*locale) return std::nullopt;
-            if (_wcsnicmp(locale, L"ko", 2) == 0) return UHI::UiLanguage::korean;
-            if (_wcsnicmp(locale, L"zh", 2) == 0) return UHI::UiLanguage::chinese;
-            if (_wcsnicmp(locale, L"en", 2) == 0) return UHI::UiLanguage::english;
-            return std::nullopt;
-        };
-
-        // GetUserDefaultUILanguage is the primary Windows display-language
-        // source.  Some Windows installations retain an English UI LANGID
-        // while the current user's preferred locale is Korean or Chinese, so
-        // consult the locale name before accepting that English fallback.
-        const auto uiLanguage = fromLanguageId(GetUserDefaultUILanguage());
-        if (uiLanguage && *uiLanguage != UHI::UiLanguage::english) return *uiLanguage;
-        wchar_t localeName[LOCALE_NAME_MAX_LENGTH]{};
-        if (GetUserDefaultLocaleName(localeName, LOCALE_NAME_MAX_LENGTH) > 0) {
-            if (const auto localeLanguage = fromLocaleName(localeName)) return *localeLanguage;
-        }
-        if (uiLanguage) return *uiLanguage;
-        if (const auto systemLanguage = fromLanguageId(GetSystemDefaultUILanguage())) return *systemLanguage;
-#endif
-        return UHI::UiLanguage::english;
+        return UHI::ResolveUiLanguage(g_uiLanguage.load());
     }
 
     const char* UiText(const char* english, const char* korean, const char* chinese) noexcept
@@ -185,7 +153,8 @@ namespace
         none,
         gameSaveRequired,
         documentRolledBack,
-        documentRollbackUnverified
+        documentRollbackUnverified,
+        fontRestartRequired
     };
     std::atomic_int g_pendingBindingWriteNotice{};
     BindingWriteNotice g_visibleBindingWriteNotice{ BindingWriteNotice::none };
@@ -2839,7 +2808,10 @@ namespace
         ImGui::PushStyleVar(ImGuiStyleVar_TabBorderSize, 1.0F);
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.36F, 0.40F, 0.46F, 0.42F));
         ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.36F, 0.40F, 0.46F, 0.32F));
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.035F, 0.043F, 0.055F, 0.35F));
+        // Device-map children should visually share the main window background.
+        // A transparent child background preserves the configured window opacity
+        // and avoids a second blue-grey layer behind the keyboard/mouse/gamepad.
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
         ImGui::PushStyleColor(ImGuiCol_Tab, ImVec4(0.08F, 0.10F, 0.13F, 0.92F));
         ImGui::PushStyleColor(ImGuiCol_TabHovered, ImVec4(0.18F, 0.39F, 0.49F, 0.96F));
         ImGui::PushStyleColor(ImGuiCol_TabActive, ImVec4(0.14F, 0.48F, 0.54F, 1.0F));
@@ -2959,6 +2931,12 @@ namespace
                     "MCM 동기화에 실패했고 원래 단축키 복구도 확인하지 못했습니다.\n계속하기 전에 원본 설정 파일을 확인하세요.",
                     "MCM 同步失败，且无法确认原快捷键是否已恢复。\n继续前请检查原始设置文件。");
                 messageColor = ImVec4(1.0F, 0.40F, 0.34F, 1.0F);
+                break;
+            case BindingWriteNotice::fontRestartRequired:
+                // Keep this first-run message ASCII-only: it is shown exactly
+                // when the active atlas may not contain the selected CJK range.
+                message = "Language glyph support was enabled in SKSE Menu Framework.\n"
+                    "Restart Skyrim once to apply it.";
                 break;
             default:
                 message = UiText("The hotkey operation has completed.",
@@ -3856,6 +3834,12 @@ namespace UHI
         if (count > 0U) g_pendingChangedHotkeyNotice.store(count);
     }
 
+    void SetMenuFrameworkFontRestartRequired() noexcept
+    {
+        g_pendingBindingWriteNotice.store(
+            static_cast<int>(BindingWriteNotice::fontRestartRequired));
+    }
+
     void SetMenuFrameworkStartScan(std::function<void()> startScan)
     {
         std::scoped_lock lock(g_statusMutex);
@@ -3897,6 +3881,7 @@ namespace UHI
     bool RegisterMenuFrameworkWindow() { return false; }
     void SetMenuFrameworkRegistry(std::shared_ptr<const Registry>, bool) {}
     void SetMenuFrameworkChangedHotkeyNotice(std::size_t) noexcept {}
+    void SetMenuFrameworkFontRestartRequired() noexcept {}
     void SetMenuFrameworkSexLabInstalled(bool) noexcept {}
     bool ToggleMenuFrameworkWindow() { return false; }
     bool CloseMenuFrameworkWindow() { return false; }

@@ -111,6 +111,32 @@ namespace
             "UniversalHotkeyManager.ini";
     }
 
+    std::filesystem::path MenuFrameworkConfigPath()
+    {
+        return std::filesystem::current_path() / "Data" / "SKSE" / "Plugins" /
+            "SKSEMenuFramework.ini";
+    }
+
+    bool EnsureLanguageGlyphRange(const UHI::UiLanguage language)
+    {
+        const auto status = UHI::EnsureMenuFrameworkGlyphRange(
+            MenuFrameworkConfigPath(), language);
+        switch (status) {
+        case UHI::MenuFrameworkGlyphRangeStatus::updated:
+            SKSE::log::info("Enabled the selected UHM language glyph range in SKSE Menu Framework; restart required");
+            return true;
+        case UHI::MenuFrameworkGlyphRangeStatus::configMissing:
+            SKSE::log::warn("SKSE Menu Framework INI was not found; UHM could not enable the selected language glyph range");
+            break;
+        case UHI::MenuFrameworkGlyphRangeStatus::writeFailed:
+            SKSE::log::error("Failed to update the selected language glyph range in SKSE Menu Framework INI");
+            break;
+        default:
+            break;
+        }
+        return false;
+    }
+
     std::filesystem::path LastScanPath()
     {
         return std::filesystem::current_path() / "Data" / "SKSE" / "Plugins" /
@@ -261,10 +287,14 @@ namespace
         std::vector<UHI::HotkeyRecord> runtimeControls)
     {
         if (runtimeControls.empty()) return;
-        std::unordered_map<std::string, UHI::HotkeyRecord> looseByIdentity;
+        std::error_code customMapError;
+        const bool customMapPresent = std::filesystem::is_regular_file(
+            std::filesystem::current_path() / "ControlMap_Custom.txt", customMapError) &&
+            !customMapError;
+        std::unordered_map<std::string, std::vector<UHI::HotkeyRecord>> looseByIdentity;
         for (const auto& record : records) {
             if (record.detector == "ControlMapScanner") {
-                looseByIdentity.try_emplace(RuntimeControlIdentity(record), record);
+                looseByIdentity[RuntimeControlIdentity(record)].push_back(record);
             }
         }
         std::unordered_set<std::string> runtimeIdentities;
@@ -273,10 +303,17 @@ namespace
             const auto identity = RuntimeControlIdentity(runtime);
             runtimeIdentities.insert(identity);
             if (const auto found = looseByIdentity.find(identity); found != looseByIdentity.end()) {
-                runtime.evidencePath = found->second.evidencePath;
-                runtime.evidenceLine = found->second.evidenceLine;
-                runtime.rawBinding = found->second.rawBinding;
-                runtime.editable = found->second.editable;
+                const auto matchingSource = std::ranges::find_if(found->second,
+                    [&](const UHI::HotkeyRecord& source) {
+                        return UHI::Scanners::MatchesEditableControlMapSource(
+                            runtime, source, customMapPresent);
+                    });
+                if (matchingSource != found->second.end()) {
+                    runtime.evidencePath = matchingSource->evidencePath;
+                    runtime.evidenceLine = matchingSource->evidenceLine;
+                    runtime.rawBinding = matchingSource->rawBinding;
+                    runtime.editable = true;
+                }
             }
         }
         std::erase_if(records, [&](const UHI::HotkeyRecord& record) {
@@ -394,6 +431,9 @@ namespace
         g_uiScale.store(std::clamp(hotkey.uiScale, 0.80F, 1.35F));
         g_windowOpacity.store(std::clamp(hotkey.windowOpacity, 0.35F, 1.0F));
         g_uiLanguage.store(static_cast<std::uint8_t>(hotkey.uiLanguage));
+        if (EnsureLanguageGlyphRange(hotkey.uiLanguage)) {
+            UHI::SetMenuFrameworkFontRestartRequired();
+        }
         SKSE::log::info("UHM opening hotkey changed to {}", UHI::FormatOpeningHotkey(hotkey));
         return true;
     }
@@ -2253,6 +2293,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
     InitializeLogging();
     SKSE::Init(skse);
     const auto openingHotkey = UHI::LoadOpeningHotkey(OpeningHotkeyPath());
+    const bool languageGlyphRestartRequired = EnsureLanguageGlyphRange(openingHotkey.uiLanguage);
     g_openingHotkeyPacked.store(PackOpeningHotkey(openingHotkey));
     g_uiScale.store(openingHotkey.uiScale);
     g_windowOpacity.store(openingHotkey.windowOpacity);
@@ -2261,6 +2302,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
     const bool menuRegistered = UHI::RegisterMenuFrameworkWindow();
     SKSE::log::info("UHI Menu Framework window registration {}",
         menuRegistered ? "succeeded" : "failed");
+    if (languageGlyphRestartRequired) UHI::SetMenuFrameworkFontRestartRequired();
     UHI::SetMenuFrameworkStartScan([] { StartScan(false); });
     UHI::SetMenuFrameworkAutomaticRefresh([] {
         if (g_hasValidatedScanSnapshot.load() && !g_scanRunning.load() &&

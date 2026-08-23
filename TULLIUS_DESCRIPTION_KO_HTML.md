@@ -19,6 +19,7 @@
   <li><b>관리</b> — 키보드·마우스·게임패드 맵과 목록에서 단축키를 한눈에 확인합니다.</li>
   <li><b>충돌 분석</b> — 양쪽 활성 컨텍스트가 모두 확정되고 동시에 작동 가능한 경우만 충돌로 표시합니다. 불명·추정 컨텍스트가 포함되면 주황색 중복으로 분리합니다.</li>
   <li><b>지원 설정 편집</b> — 지원되는 활성 설정 파일의 바인딩은 관리 창에서 수정할 수 있습니다. DirectInput, SKSE 통합 코드, Windows VK, XInput/controlmap, ReShade, Community Shaders 및 지원 기호 형식을 원본 규칙에 맞춰 저장하고, 손실 가능성이 있는 변환은 거부합니다. 최초 수정 시 <code>.uhi.bak</code> 백업을 만들고, 안전하게 파일을 교체한 뒤 재스캔합니다.</li>
+  <li><b>스카이림 사용자 키 정확히 표시</b> — 스카이림 자체 조작 메뉴에서 바꾼 키는 현재 런타임 ControlMap 값으로 정확히 표시합니다. 유효한 루트 <code>ControlMap_Custom.txt</code>가 있으면 스카이림 기본 조작은 모두 읽기 전용이며, 바이너리 사용자 맵이 없을 때만 현재 키와 정확히 일치하는 loose <code>controlmap.txt</code> 바인딩을 변경할 수 있습니다.</li>
   <li><b>캐시 기반 증분 갱신</b> — 최초 전체 스캔 후에는 완료된 세이브 로드 때만 빠른 증분 확인을 한 번 수행합니다. 창을 열기만 해서는 재스캔하지 않으며 변경되지 않은 파일은 캐시에서 재사용합니다.</li>
   <li><b>세이브와 독립된 결과 저장</b> — 성공한 스캔 결과는 Skyrim 세이브 없이 즉시 저장됩니다. 새로 추가되거나 변경된 활성 단축키가 있을 때만 무딤 없는 개수 알림을 표시합니다.</li>
 </ul>
@@ -32,6 +33,16 @@
   <li>Options에서 창을 여는 단축키, 전체 글자 크기, 인터페이스 언어, UI 창 투명도를 변경할 수 있습니다.</li>
   <li>장치 키 좌클릭은 명칭 변경, 우클릭은 명칭/단축키 변경이며 ESC는 편집 내용을 저장하지 않고 팝업을 닫습니다.</li>
 </ol>
+
+<h3>스카이림 기본 조작을 UHM에서 변경하려면</h3>
+<p><code>controlmap.txt</code>는 사람이 읽고 편집할 수 있는 입력·컨텍스트 원본 정의이며, MO2에서는 보통 <code>Data/Interface/Controls/PC/controlmap.txt</code>가 가상 Data에서 적용됩니다. 게임 루트의 <code>ControlMap_Custom.txt</code>는 Skyrim의 <b>System &gt; Controls</b> 메뉴에서 바꾼 키를 게임이 저장하는 별도의 바이너리 덮어쓰기 파일입니다.</p>
+<ol>
+  <li>게임을 완전히 종료합니다.</li>
+  <li><code>SkyrimSE.exe</code> 옆의 <code>ControlMap_Custom.txt</code>를 백업한 뒤 삭제합니다.</li>
+  <li>현재 게임 버전에 맞는 loose <code>Data/Interface/Controls/PC/controlmap.txt</code>가 MO2에서 최종 적용되는지 확인합니다.</li>
+  <li>게임을 실행하고 UHM 전체 스캔을 진행합니다.</li>
+</ol>
+<p>Custom 파일이 있으면 UHM은 현재 변경값을 정확히 표시하지만 스카이림 기본 조작은 읽기 전용입니다. Custom 파일을 삭제하면 현재 유효한 controlmap 값으로 돌아가며, 게임 실행만으로는 파일이 다시 생기지 않습니다. 이후 Skyrim Controls 메뉴에서 키를 바꾸면 새 Custom 파일이 생성되고 UHM에서도 다시 읽기 전용이 됩니다. 구버전용 controlmap을 다른 런타임에 사용하면 입력 이상이나 시작 실패가 생길 수 있으므로 런타임 호환성을 확인하세요.</p>
 
 <p style="text-align:center"><img src="https://ac-o.arca.live/20260822sac/b06518f9e412cd10d96cc3c64046137e7eaa2f2875dc9715a39af80fbad7f8dd.png?expires=1787432465&amp;key=PpQNbJMfVYO2b3w1SjcywQ&amp;type=orig" alt="UHM 단축키 관리 캡처"><br><small>정렬·검색·필터와 단축키 관리 목록</small></p>
 
@@ -52,19 +63,9 @@
 </ul>
 
 <p><b>주의:</b> UHM은 모든 파일 속 숫자를 무조건 충돌로 표시하지 않습니다. 실제로 사용 중인 바인딩과 확인 가능한 근거를 우선하며, 편집은 지원되는 활성 설정 출처에만 적용됩니다.</p>
-<p>자동 언어는 Windows 사용자 UI 언어와 로케일을 확인하며 한국어·영어·중국어를 지원합니다. 옵션에서 수동 선택도 가능하고 UI 창 투명도는 본체 배경에만 적용됩니다. UTF-8 모드명과 경로는 그대로 지원합니다.</p>
+<p>자동 언어는 Windows 사용자 UI 언어와 로케일을 확인하며 한국어·영어·중국어를 지원합니다. 옵션에서 수동 선택도 가능하고 UI 창 투명도는 본체 배경에만 적용됩니다. UTF-8 모드명과 경로는 Windows의 선택적 시스템 전체 UTF-8 설정을 켜지 않아도 지원합니다. UHM은 SKSE Menu Framework의 <code>PrimaryFont</code>와 다른 옵션은 보존한 채 현재 언어에 필요한 한국어 또는 중국어 글리프 범위만 자동으로 켭니다. 변경 안내가 뜬 경우 글꼴 아틀라스 적용을 위해 스카이림을 한 번 재시작하세요. 선택된 폰트에는 해당 글자가 포함되어 있어야 합니다.</p>
 <p><b>Escape</b>를 누르면 관리 창이 닫힙니다. 편집 입력 중에는 Escape가 해당 입력 취소에 사용됩니다.</p>
-<h3>라이선스와 소스</h3>
-<p>UHM은 <b>GPL-3.0-or-later</b> 자유 소프트웨어입니다. 1.0.2부터 Nexus에는 MO2용 Release ZIP만 올리며, 바이너리에 대응하는 전체 소스·빌드 스크립트·버전 태그는 <a href="https://github.com/compilecraftworks/Universal-Hotkey-Manager-for-Skyrim-SE-AE">GitHub 공개 저장소</a>에서 제공합니다. 설치한 버전과 같은 태그(예: <b>v1.0.2</b>)를 선택하면 됩니다. Release ZIP에는 UHM 전체 라이선스와 서드파티 고지·라이선스 원문이 들어 있습니다. 마우스·게임패드 라인 그림은 UHM용으로 직접 제작한 원본 GPL-3.0-or-later 자산입니다.</p>
-<h3>크레딧</h3>
-<ul>
-  <li><a href="https://github.com/CharmedBaryon/CommonLibSSE-NG">CommonLibSSE-NG</a> - MIT</li>
-  <li><a href="https://github.com/Thiago099/SKSE-Menu-Framework">SKSE Menu Framework</a> - MIT, 런타임 선행 모드</li>
-  <li><a href="https://github.com/ocornut/imgui">Dear ImGui</a> / <a href="https://github.com/cimgui/cimgui">cimgui</a> - MIT</li>
-  <li><a href="https://github.com/fmtlib/fmt">fmt</a> / <a href="https://github.com/gabime/spdlog">spdlog</a> - MIT</li>
-  <li><a href="https://github.com/herumi/xbyak">Xbyak</a> / <a href="https://github.com/d99kris/rapidcsv">rapidcsv</a> - BSD-3-Clause</li>
-  <li><a href="https://github.com/lz4/lz4">LZ4</a> - BSD-2-Clause, <a href="https://zlib.net/">zlib</a> - zlib License</li>
-  <li><a href="https://github.com/zyantific/zydis">Zydis</a> / <a href="https://github.com/zyantific/zycore-c">Zycore</a> - MIT</li>
-  <li><a href="https://skse.silverlock.org/">SKSE64</a> / Address Library for SKSE Plugins - 런타임 선행 모드</li>
-</ul>
+<h3>Credits &amp; License</h3>
+<p>Universal Hotkey Manager for Skyrim SE-AE는 <a href="https://www.gnu.org/licenses/gpl-3.0.html"><b>GNU GPLv3</b></a>로 배포됩니다. 전체 소스 코드·빌드 스크립트·바이너리에 대응하는 버전 태그는 <a href="https://github.com/compilecraftworks/Universal-Hotkey-Manager-for-Skyrim-SE-AE"><b>GitHub</b></a>에서 제공합니다. 1.0.2부터 Nexus에는 MO2용 Release ZIP만 올립니다.</p>
+<p>CommonLibSSE-NG, SKSE Menu Framework, Dear ImGui/cimgui, SKSE64, Address Library for SKSE Plugins 제작자에게 감사드립니다. 상세 서드파티 고지와 라이선스 원문은 Release ZIP에 포함되어 있으며 각 권리는 원저작자에게 있습니다.</p>
 ```

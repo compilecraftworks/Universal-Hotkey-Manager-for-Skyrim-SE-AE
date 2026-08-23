@@ -123,6 +123,16 @@ namespace
 
 namespace UHI::Scanners
 {
+    bool MatchesEditableControlMapSource(const HotkeyRecord& runtime,
+        const HotkeyRecord& source, const bool customMapPresent) noexcept
+    {
+        return !customMapPresent && runtime.detector == "ControlMapScanner" &&
+            source.detector == "ControlMapScanner" && source.editable &&
+            runtime.owner == source.owner && runtime.action == source.action &&
+            runtime.device == source.device && runtime.contextMask == source.contextMask &&
+            runtime.binding == source.binding;
+    }
+
     std::vector<HotkeyRecord> ControlMapScanner::Scan(const std::filesystem::path& path) const
     {
         std::ifstream input(path);

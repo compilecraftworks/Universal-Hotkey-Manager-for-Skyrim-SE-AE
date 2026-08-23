@@ -30,6 +30,12 @@ int main()
         "\n// Debug Map Menu\nDebugMapKey 0x3d 0xff 0xff 0 0 0\n"
         "\n// Creations Menu\nCreationsKey 0x3e 0xff 0xff 0 0 0\n");
     const auto known = UHI::Scanners::ControlMapScanner{}.KnownGameDefaults(path.parent_path());
+    auto sameRuntime = memoryRecords[0];
+    sameRuntime.stage = UHI::ScanStage::runtime;
+    sameRuntime.runtimeActive = true;
+    sameRuntime.editable = false;
+    auto remappedRuntime = sameRuntime;
+    remappedRuntime.binding = "F2";
     std::filesystem::remove(path);
     if (records.size() != 8 || records[0].binding != "W" || records[1].binding != "LMB" ||
         records[2].binding != "A" || records[3].binding != "F10" || records[4].binding != "F11" ||
@@ -46,6 +52,10 @@ int main()
         memoryRecords[1].binding != "A" || known.size() < 50 || known[0].action != "Forward" ||
         known[0].binding != "W" || known[0].evidenceLine != 15 || known[0].editable ||
         known[0].evidencePath.string().find(".bsa") != std::string::npos ||
+        !UHI::Scanners::MatchesEditableControlMapSource(sameRuntime, memoryRecords[0], false) ||
+        UHI::Scanners::MatchesEditableControlMapSource(sameRuntime, memoryRecords[0], true) ||
+        UHI::Scanners::MatchesEditableControlMapSource(remappedRuntime, memoryRecords[0], false) ||
+        UHI::Scanners::MatchesEditableControlMapSource(sameRuntime, known[0], false) ||
         UHI::FormatControlMapGamepadCode(0x000B) != "Left Stick" ||
         UHI::FormatControlMapGamepadCode(0x000C) != "Right Stick" ||
         UHI::FormatControlMapGamepadCode(0x0040) != "Left Stick Click" ||

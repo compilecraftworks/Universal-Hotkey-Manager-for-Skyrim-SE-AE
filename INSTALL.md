@@ -9,7 +9,7 @@
 
 Menu Framework 2.x/3.x embeds ImGui in `SKSEMenuFramework.dll`. UHM does not require or load a separate `imgui.dll`.
 
-The in-game interface defaults to automatic Windows-language detection and supports Korean, English, and Chinese. **Options > Appearance** controls overall text size, main-window opacity, and can fix a language manually. UTF-8 mod names and filesystem paths remain supported without enabling Windows' optional system-wide UTF-8 locale.
+The in-game interface defaults to automatic Windows-language detection and supports Korean, English, and Chinese. **Options > Appearance** controls overall text size, main-window opacity, and can fix a language manually. UTF-8 mod names and filesystem paths remain supported without enabling Windows' optional system-wide UTF-8 locale. UHM preserves Menu Framework's `PrimaryFont` and other settings while enabling only the Korean or Chinese glyph range required by the selected language. If UHM changes that range, restart Skyrim once after the notice so Menu Framework can rebuild its font atlas. The configured primary font must contain the requested glyphs.
 
 ## Mod Organizer 2
 
@@ -22,6 +22,12 @@ The in-game interface defaults to automatic Windows-language detection and suppo
 Press `Escape` to close the manager. If a rename, binding, or opening-shortcut capture is active, Escape cancels that input first.
 
 UHM is ESP-free and does not require a new game. Initial startup performs only an exact virtual `SexLab.esm` presence check and a bounded previous-result read. After one requested full scan has established a validated snapshot, a completed save load schedules a cached incremental refresh; opening UHM alone does not rescan. Unchanged virtual files are reused and there is no frame-by-frame filesystem monitoring.
+
+## Skyrim controlmap ownership
+
+The loose, readable Skyrim mapping is `Data/Interface/Controls/PC/controlmap.txt`. `ControlMap_Custom.txt` beside `SkyrimSE.exe` is a binary override created after changing a binding in Skyrim's own Controls menu. UHM displays the resulting live keys but treats them as read-only whenever that custom file is effective.
+
+To edit an installed loose controlmap through UHM, close Skyrim, back up and delete the root `ControlMap_Custom.txt`, confirm the intended runtime-compatible loose `controlmap.txt` wins in MO2's virtual Data tree, then start Skyrim and run a full scan. Starting the game alone does not recreate the custom file; using Skyrim's Controls menu to change a binding does. Deleting it restores the currently effective loose or archived controlmap values, not necessarily Bethesda defaults. Do not use a controlmap built for an incompatible Skyrim runtime.
 
 ## Updating
 

@@ -2,23 +2,18 @@
 
 ## 1.0.2 - 2026-08-23
 
-- Made Escape ownership deterministic: editor and notification popups consume the press and close only themselves, while Escape with no popup closes UHM and cannot open Skyrim's system menu underneath it.
-- Reworked Options > Appearance into compact text-size, interface-language, and main-window-opacity rows. The new opacity preference is saved automatically without fading controls, device art, text, or modal popups.
-- Restored the validated hotkey snapshot before the first window draw and limited automatic refresh to invalidated evidence after completed save loads, so opening UHM no longer starts a redundant scan.
-- Read live runtime ControlMap bindings before loose `Interface/Controls/PC/controlmap.txt` and built-in defaults, so controls changed in Skyrim are reflected immediately. Console, debug, Creation/marketplace, and other excluded control contexts are filtered from both runtime and fallback results.
-- Bounded native `ProcessEvent` disassembly to prevent unusually large DLLs such as SKSE Menu Framework from stalling stage 3, while retaining the complete DLL string, import, symbol, comparison, and active-sink evidence passes used for hotkey discovery.
-- Finalized the readable device UI: black key surfaces, gray empty-key outlines, category-colored occupied outlines and tabs, no amber overlap outline, compact action text, matched keyboard/mouse/gamepad typography, canonical D-pad and mouse side-button labels, category-aware multi-binding tooltips, and dark option separators.
-- Hardened rename and hotkey editor routing from Device View context menus and all sortable manager tables. Read-only records do not open a hotkey editor; supported DirectInput, SKSE unified, Windows-VK, XInput/controlmap, ReShade, Community Shaders, ENB, document, and MCM writers retain source-specific serialization and transactional rollback.
-- Completed GPL-3.0-or-later distribution metadata and third-party credits. Nexus now receives the Release ZIP only; complete corresponding source, build scripts, and notices are published in the public GitHub repository under the matching version tag. The Release ZIP retains the full project license and all required third-party license texts, and the packaged mouse/gamepad illustrations are identified as original GPL-covered UHM artwork.
+- Fixed Escape ownership, popup routing, and input blocking so editors close without saving, UHM closes independently, and Skyrim's system menu does not open underneath it.
+- Restored validated cached results before the first draw, limited automatic refresh to changed evidence after completed save loads, and prevented large DLL analysis from stalling stage 3 without reducing the remaining hotkey evidence passes.
+- Applied live runtime ControlMap user bindings before loose and built-in defaults, while excluding console, debug, Creation/marketplace, and other unsupported control contexts.
+- Refined Options and the keyboard, mouse, and gamepad views with saved opacity, consistent category styling, compact labels, clearer tooltips, and reliable rename/hotkey editors.
+- Fixed Korean and Chinese glyph setup without requiring Windows' UTF-8 beta locale, while preserving Menu Framework's selected primary font and unrelated settings.
+- Verified source-specific DirectInput, SKSE unified, Windows-VK, XInput/controlmap, overlay, document, and MCM write/rollback paths; completed GPLv3 release metadata and GitHub source publication.
 
 ## 1.0.1 - 2026-08-23
 
-- Fixed the shared editor-popup request path so **Rename** and **Change Hotkey** open reliably from both Device View and every category/Overview Hotkey Manager table.
-- Kept modal requests queued until ImGui confirms that the popup is visible, preventing requests from being lost while a context menu closes or Menu Framework changes popup stacks.
-- Applied the same retained-request behavior to changed-hotkey and hotkey-write notifications. A dismissed notification is consumed once and does not reappear merely because UHM is reopened.
-- Preserved modal input blocking, undimmed backgrounds, centered content and buttons, Escape-to-cancel without saving, category-aware multi-binding tooltips, and source-aware hotkey serialization.
-- Added diagnostic log entries for queued and opened rename/hotkey editors to make any remaining framework-specific popup failure directly traceable.
-- Added the final Overview, Hotkey Manager, and Options screenshots to the English Nexus BBCode and Korean HTML descriptions, and added a matching Korean changelog.
+- Fixed lost Rename and Change Hotkey popup requests from Device View and every manager table.
+- Made edit and notification popups persistent until opened, one-shot after dismissal, centered, undimmed, input-blocking, and cancellable with Escape.
+- Added popup diagnostics, multi-binding tooltips, source-aware serialization checks, final screenshots, and matching English/Korean documentation.
 
 ## 1.0.0 - 2026-08-23
 
