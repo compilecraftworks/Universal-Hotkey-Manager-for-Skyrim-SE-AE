@@ -1,0 +1,89 @@
+# Universal Hotkey Manager for Skyrim SE-AE — Nexus Description (Korean HTML)
+
+```html
+<h2>Universal Hotkey Manager for Skyrim SE-AE</h2>
+
+<p><strong>스캔. 감지. 관리.</strong></p>
+
+<p>Universal Hotkey Manager for Skyrim SE-AE(UHM)은 스카이림의 단축키를 하나의 인게임 관리 창에서 확인할 수 있게 해 주는 ESP 없는 SKSE 플러그인입니다.</p>
+
+<p>활성 모드 구성을 스캔하여 스카이림 기본 조작, 모드 설정 파일, MCM 설정, 스크립트, 네이티브 플러그인, ReShade, ENB, Community Shaders 등에서 키보드·마우스·게임패드 바인딩을 찾아냅니다. 카테고리별로 감지된 바인딩을 확인하고, 추정 소유자와 출처를 보며, 스카이림의 활성화 상황을 고려해 실제 충돌을 식별할 수 있습니다.</p>
+
+<figure style="text-align:center">
+  <img src="https://ac-o.arca.live/20260822sac/df718d47d60f684654b3b2203b13f1dd3b8afc95784a7ddf2eaf6cde960d5e00.png?expires=1787432465&amp;key=6McVuGub4MVjzdSd5oInAQ&amp;type=orig" alt="UHM 오버뷰와 장치 맵 캡처">
+  <figcaption>오버뷰와 장치 맵</figcaption>
+</figure>
+
+<h3>주요 기능</h3>
+
+<ul>
+  <li><strong>모든 단축키를 한곳에서</strong> — 키보드, 마우스, 게임패드 바인딩을 네이티브 인게임 UI에서 확인합니다.</li>
+  <li><strong>상황 인식 충돌 감지</strong> — 양쪽 활성 컨텍스트가 모두 확정되고 실제로 겹칠 때만 충돌로 표시합니다. 불명 또는 추정 컨텍스트가 포함되면 주황색 중복으로, 확정적으로 분리된 컨텍스트는 비충돌로 처리합니다.</li>
+  <li><strong>폭넓은 모드 지원</strong> — 지원되는 INI, JSON/JSONC, TOML, YAML, XML, CFG, CONF, SETTINGS, PROPERTIES 파일과 관련 MCM, 스크립트, 아카이브, 플러그인 근거를 스캔합니다.</li>
+  <li><strong>기기 맵</strong> — 키보드, 마우스, 게임패드 레이아웃에서 바인딩을 직접 확인합니다.</li>
+  <li><strong>안전한 지원 설정 편집</strong> — 관리 창에서 유효한 느슨한 설정 파일의 바인딩을 직접 수정할 수 있습니다. DirectInput, SKSE 통합 코드, Windows VK, XInput/controlmap, ReShade, Community Shaders 및 지원되는 기호 형식을 원본 규칙에 맞춰 저장하며, 손실 없이 표현할 수 없는 변환은 거부합니다. 최초 수정 시 <code>.uhi.bak</code> 백업을 만든 뒤 원자적으로 파일을 교체하고 재스캔합니다.</li>
+  <li><strong>캐시 기반 증분 갱신</strong> — 최초 전체 스캔은 직접 시작합니다. 이후 완료된 세이브 로드 때만 캐시 기반 증분 확인을 한 번 수행하며, 창을 열기만 해서는 재스캔하지 않고 프레임 단위 감시도 하지 않습니다.</li>
+  <li><strong>세이브와 독립된 결과 저장</strong> — 성공한 스캔 결과는 Skyrim 세이브 없이 UHM이 즉시 저장합니다. 활성 단축키가 새로 생기거나 바뀐 경우에만 무딤 없는 개수 알림을 한 번 표시합니다.</li>
+  <li><strong>리포트 생성</strong> — 스캔이 성공하면 상세 JSON 리포트를 생성합니다.</li>
+</ul>
+
+<h3>사용 방법</h3>
+
+<ol>
+  <li>기본 단축키인 <strong>Delete</strong>로 관리 창을 엽니다.</li>
+  <li><strong>Options</strong>에서 스캔을 시작합니다.</li>
+  <li>바인딩, 소유자, 출처, 활성화 상황, 충돌을 검토합니다.</li>
+  <li>카테고리 탭, 기기 맵, 필터를 사용해 원하는 항목을 찾습니다.</li>
+  <li><strong>Options</strong>에서 관리 창을 여는 단축키, 전체 UI 글자 크기, 인터페이스 언어, UI 창 투명도를 변경할 수 있습니다.</li>
+  <li>장치 키를 좌클릭하면 명칭 변경, 우클릭하면 명칭 변경/단축키 변경 메뉴가 열립니다. 목록에서는 행의 변경 버튼을 사용합니다.</li>
+  <li><strong>ESC</strong>는 UHM을 닫고, 편집·입력 팝업에서는 저장하지 않고 해당 팝업을 취소합니다.</li>
+</ol>
+
+<figure style="text-align:center">
+  <img src="https://ac-o.arca.live/20260822sac/b06518f9e412cd10d96cc3c64046137e7eaa2f2875dc9715a39af80fbad7f8dd.png?expires=1787432465&amp;key=PpQNbJMfVYO2b3w1SjcywQ&amp;type=orig" alt="UHM 단축키 관리 캡처">
+  <figcaption>정렬 가능한 목록과 단축키 변경</figcaption>
+</figure>
+
+<h3>창 열기 단축키 복구</h3>
+<p>Delete가 겹쳐 UHM을 열 수 없다면 게임을 끈 뒤 <code>Data/SKSE/Plugins/UniversalHotkeyManager.ini</code>를 편집하세요. MO2에서는 보통 <code>Overwrite/SKSE/Plugins/UniversalHotkeyManager.ini</code>에 생성됩니다. <code>ToggleKey=0xD3</code>는 DirectInput 스캔코드 기준 Delete이며 <code>WindowOpacity=0.90</code>은 본체 창 배경에만 적용됩니다. INI를 삭제하면 Delete·100% 글자 크기·90% 투명도·자동 언어로 복구됩니다.</p>
+
+<h3>캐시 위치와 삭제</h3>
+<p><code>Data/SKSE/Plugins/UniversalHotkeyManager/scan-cache-v1.bin</code><br><code>Data/SKSE/Plugins/UniversalHotkeyManager/last-scan-v1.bin</code></p>
+<p>MO2에서는 보통 <code>Overwrite/SKSE/Plugins/UniversalHotkeyManager/</code>에 있습니다. 첫 파일은 파일별 스캔 캐시, 둘째는 즉시 복원할 화면 결과입니다. 게임을 끈 상태에서 둘 다 삭제하면 다음 전체 스캔 때 다시 생성됩니다.</p>
+
+<figure style="text-align:center">
+  <img src="https://ac-o.arca.live/20260822sac/a7cb6c6ae6070b89a70f12a35a133188d703f0ded837994284099c38ddaf814b.png?expires=1787432465&amp;key=mQIIuEmXwguUsBRoc7kfQw&amp;type=orig" alt="UHM 옵션 화면 캡처">
+  <figcaption>스캐너, 글자 크기·언어·투명도, 창 열기 단축키</figcaption>
+</figure>
+
+<h3>요구 사항</h3>
+
+<ul>
+  <li>Skyrim Special Edition / Anniversary Edition</li>
+  <li>SKSE64</li>
+  <li>Address Library / CommonLib 호환 게임 런타임</li>
+  <li>SKSE Menu Framework 2.1.1 이상</li>
+  <li>SKSE 플러그인에 필요한 Microsoft Visual C++ Redistributable</li>
+</ul>
+
+<h3>참고</h3>
+
+<p>UHM은 모든 정적 값을 확정 충돌로 표시하지 않고, 실제로 유효한 활성 바인딩을 중심으로 보여 주도록 설계되었습니다. 읽기 전용 근거도 필요한 경우 표시하지만, 직접 편집할 수 있는 것은 지원되는 활성 설정 출처에 한정됩니다.</p>
+<p>자동 언어는 Windows 사용자 UI 언어와 로케일을 함께 확인하며 한국어·영어·중국어를 지원합니다. 옵션에서 수동 고정할 수도 있습니다. UTF-8 모드명과 경로는 Windows의 선택적 시스템 전체 UTF-8 설정 없이도 지원합니다.</p>
+<p><strong>Escape</strong>를 누르면 관리 창이 닫힙니다. 명칭 또는 단축키 입력 팝업이 활성화된 동안에는 창을 닫는 대신 해당 입력을 취소합니다.</p>
+
+<h3>라이선스와 소스</h3>
+<p>UHM은 <strong>GPL-3.0-or-later</strong>로 배포되는 자유 소프트웨어입니다. 1.0.2부터 Nexus에는 MO2용 Release ZIP만 올립니다. 바이너리에 대응하는 전체 소스·빌드 스크립트·버전 태그는 <a href="https://github.com/compilecraftworks/Universal-Hotkey-Manager-for-Skyrim-SE-AE">GitHub 공개 저장소</a>에서 제공하며, 설치한 버전과 같은 태그(예: <strong>v1.0.2</strong>)를 선택하면 됩니다. Release ZIP에는 UHM 전체 라이선스와 서드파티 고지·필수 라이선스 원문이 들어 있습니다. 마우스·게임패드 라인 일러스트는 UHM용으로 직접 제작한 원본 GPL-3.0-or-later 자산입니다.</p>
+
+<h3>크레딧</h3>
+<ul>
+  <li><a href="https://github.com/CharmedBaryon/CommonLibSSE-NG">CommonLibSSE-NG</a> - MIT</li>
+  <li><a href="https://github.com/Thiago099/SKSE-Menu-Framework">SKSE Menu Framework</a> - MIT, 런타임 선행 모드이며 UHM에 재배포하지 않음</li>
+  <li><a href="https://github.com/ocornut/imgui">Dear ImGui</a> / <a href="https://github.com/cimgui/cimgui">cimgui</a> - MIT</li>
+  <li><a href="https://github.com/fmtlib/fmt">fmt</a> / <a href="https://github.com/gabime/spdlog">spdlog</a> - MIT</li>
+  <li><a href="https://github.com/herumi/xbyak">Xbyak</a> / <a href="https://github.com/d99kris/rapidcsv">rapidcsv</a> - BSD-3-Clause</li>
+  <li><a href="https://github.com/lz4/lz4">LZ4</a> - BSD-2-Clause, <a href="https://zlib.net/">zlib</a> - zlib License</li>
+  <li><a href="https://github.com/zyantific/zydis">Zydis</a> / <a href="https://github.com/zyantific/zycore-c">Zycore</a> - MIT</li>
+  <li><a href="https://skse.silverlock.org/">SKSE64</a> / Address Library for SKSE Plugins - 런타임 선행 모드이며 UHM에 재배포하지 않음</li>
+</ul>
+```

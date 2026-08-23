@@ -1,0 +1,32 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Cache vcpkg downloads and installed packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            .deps/vcpkg/downloads
+            build/skse/vcpkg_installed
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+
+      - name: Build SKSE plugin and run tests
+        shell: pwsh
+        run: .\scripts\build.ps1 -WithSkse

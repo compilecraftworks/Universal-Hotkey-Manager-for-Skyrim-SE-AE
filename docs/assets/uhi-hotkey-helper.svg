@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="860" viewBox="0 0 1440 860">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#111827" stop-opacity=".98"/>
+      <stop offset="1" stop-color="#0b1220" stop-opacity=".96"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7c5cff"/>
+      <stop offset="1" stop-color="#27d3c2"/>
+    </linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000" flood-opacity=".45"/></filter>
+    <style>
+      .sans{font-family:Segoe UI,Arial,sans-serif}.muted{fill:#9aa8bd}.white{fill:#f5f7fb}.small{font-size:16px}.label{font-size:18px;font-weight:600}.key{fill:#1f2b40;stroke:#52627a;stroke-width:1}.row{fill:#172238}.rowhot{fill:#2b2035;stroke:#d65b9c;stroke-width:1}.chip{fill:#263651}.mono{font-family:Consolas,monospace;font-weight:700}
+    </style>
+  </defs>
+  <rect width="1440" height="860" fill="#060b14"/>
+  <rect x="78" y="54" width="1284" height="752" rx="22" fill="url(#bg)" stroke="#34435b" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="78" y="54" width="1284" height="8" rx="4" fill="url(#accent)"/>
+  <text x="120" y="112" class="sans white" font-size="30" font-weight="700">Universal Hotkey Manager for Skyrim SE-AE</text>
+  <text x="120" y="142" class="sans muted small">HOTKEY HELPER  /  LIVE REFERENCE</text>
+  <circle cx="1240" cy="111" r="7" fill="#35d39a"/><text x="1260" y="117" class="sans" fill="#b8c7da" font-size="16">Scan complete</text>
+  <rect x="119" y="174" width="1202" height="58" rx="12" fill="#101a2d" stroke="#293951"/>
+  <text x="145" y="210" class="sans muted small">FILTER</text>
+  <rect x="230" y="188" width="96" height="32" rx="16" fill="#725cff"/><text x="278" y="210" text-anchor="middle" class="sans white small">All</text>
+  <rect x="336" y="188" width="122" height="32" rx="16" class="chip"/><text x="397" y="210" text-anchor="middle" class="sans muted small">Conflicts</text>
+  <rect x="468" y="188" width="128" height="32" rx="16" class="chip"/><text x="532" y="210" text-anchor="middle" class="sans muted small">Category</text>
+  <rect x="606" y="188" width="148" height="32" rx="16" class="chip"/><text x="680" y="210" text-anchor="middle" class="sans muted small">Current device</text>
+  <text x="1238" y="210" text-anchor="end" class="sans muted small">143 bindings  ·  8 conflicts</text>
+
+  <g transform="translate(119 262)">
+    <rect width="380" height="496" rx="16" fill="#111d31" stroke="#2d3d58"/>
+    <text x="25" y="42" class="sans white label">KEYBOARD</text><text x="355" y="42" text-anchor="end" class="sans muted small">62</text>
+    <g transform="translate(18 66)">
+      <rect width="344" height="58" rx="9" class="row"/><rect x="14" y="12" width="56" height="34" rx="7" class="key"/><text x="42" y="35" text-anchor="middle" class="sans white mono">F6</text><text x="88" y="27" class="sans white small">Community Shaders</text><text x="88" y="47" class="sans muted" font-size="13">External tools</text><circle cx="320" cy="29" r="5" fill="#35d39a"/>
+      <rect y="68" width="344" height="58" rx="9" class="rowhot"/><rect x="14" y="80" width="56" height="34" rx="7" class="key"/><text x="42" y="103" text-anchor="middle" class="sans white mono">F11</text><text x="88" y="95" class="sans white small">Hotkey Helper</text><text x="88" y="115" class="sans" fill="#f18abb" font-size="13">Interface  ·  conflict</text><text x="320" y="104" text-anchor="middle" class="sans" fill="#ff6b9d" font-size="18">!</text>
+      <rect y="136" width="344" height="58" rx="9" class="row"/><rect x="14" y="148" width="56" height="34" rx="7" class="key"/><text x="42" y="171" text-anchor="middle" class="sans white mono">W</text><text x="88" y="163" class="sans white small">Forward</text><text x="88" y="183" class="sans muted" font-size="13">Skyrim default</text><circle cx="320" cy="165" r="5" fill="#35d39a"/>
+      <rect y="204" width="344" height="58" rx="9" class="row"/><rect x="14" y="216" width="56" height="34" rx="7" class="key"/><text x="42" y="239" text-anchor="middle" class="sans white mono">N</text><text x="88" y="231" class="sans white small">SL Target setting</text><text x="88" y="251" class="sans muted" font-size="13">SexLab</text><circle cx="320" cy="233" r="5" fill="#f0b45b"/>
+      <rect y="272" width="344" height="58" rx="9" class="row"/><rect x="14" y="284" width="56" height="34" rx="7" class="key"/><text x="42" y="307" text-anchor="middle" class="sans white mono">F10</text><text x="88" y="299" class="sans white small">UHI window</text><text x="88" y="319" class="sans muted" font-size="13">Editable  ✎</text><circle cx="320" cy="301" r="5" fill="#35d39a"/>
+    </g>
+  </g>
+
+  <g transform="translate(530 262)">
+    <rect width="380" height="496" rx="16" fill="#111d31" stroke="#2d3d58"/>
+    <text x="25" y="42" class="sans white label">MOUSE</text><text x="355" y="42" text-anchor="end" class="sans muted small">21</text>
+    <g transform="translate(18 66)">
+      <rect width="344" height="58" rx="9" class="row"/><rect x="14" y="12" width="56" height="34" rx="7" class="key"/><text x="42" y="35" text-anchor="middle" class="sans white mono">LMB</text><text x="88" y="27" class="sans white small">Attack Right</text><text x="88" y="47" class="sans muted" font-size="13">Skyrim default</text><circle cx="320" cy="29" r="5" fill="#35d39a"/>
+      <rect y="68" width="344" height="58" rx="9" class="row"/><rect x="14" y="80" width="56" height="34" rx="7" class="key"/><text x="42" y="103" text-anchor="middle" class="sans white mono">RMB</text><text x="88" y="95" class="sans white small">Guard</text><text x="88" y="115" class="sans muted" font-size="13">Skyrim default</text><circle cx="320" cy="97" r="5" fill="#35d39a"/>
+      <rect y="136" width="344" height="58" rx="9" class="row"/><rect x="14" y="148" width="56" height="34" rx="7" class="key"/><text x="42" y="171" text-anchor="middle" class="sans white mono">M4</text><text x="88" y="163" class="sans white small">Lock-on</text><text x="88" y="183" class="sans muted" font-size="13">Combat</text><circle cx="320" cy="165" r="5" fill="#35d39a"/>
+    </g>
+  </g>
+
+  <g transform="translate(941 262)">
+    <rect width="380" height="496" rx="16" fill="#111d31" stroke="#2d3d58"/>
+    <text x="25" y="42" class="sans white label">GAMEPAD</text><text x="355" y="42" text-anchor="end" class="sans muted small">17</text>
+    <g transform="translate(18 66)">
+      <rect width="344" height="58" rx="9" class="row"/><rect x="14" y="12" width="56" height="34" rx="7" class="key"/><text x="42" y="35" text-anchor="middle" class="sans white mono">A</text><text x="88" y="27" class="sans white small">Activate</text><text x="88" y="47" class="sans muted" font-size="13">Skyrim default</text><circle cx="320" cy="29" r="5" fill="#35d39a"/>
+      <rect y="68" width="344" height="58" rx="9" class="row"/><rect x="14" y="80" width="56" height="34" rx="7" class="key"/><text x="42" y="103" text-anchor="middle" class="sans white mono">LB</text><text x="88" y="95" class="sans white small">Sprint</text><text x="88" y="115" class="sans muted" font-size="13">Skyrim default</text><circle cx="320" cy="97" r="5" fill="#35d39a"/>
+      <rect y="136" width="344" height="58" rx="9" class="row"/><rect x="14" y="148" width="56" height="34" rx="7" class="key"/><text x="42" y="171" text-anchor="middle" class="sans white mono">RB</text><text x="88" y="163" class="sans white small">Power / Shout</text><text x="88" y="183" class="sans muted" font-size="13">Skyrim default</text><circle cx="320" cy="165" r="5" fill="#35d39a"/>
+    </g>
+  </g>
+</svg>

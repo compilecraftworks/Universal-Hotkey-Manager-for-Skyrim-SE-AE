@@ -1,0 +1,14 @@
+/build/
+/.deps/
+/out/
+/releases/
+/dist/
+/.vs/
+/.idea/
+/.vscode/
+*.user
+*.log
+*.zip
+*.bak
+*.uhi.bak
+CMakeUserPresets.json

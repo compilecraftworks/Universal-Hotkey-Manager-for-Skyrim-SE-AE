@@ -1,0 +1,17 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "windows-debug",
+      "displayName": "Windows Debug (core and tests)",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build/windows-debug",
+      "architecture": "x64",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "UHI_BUILD_TESTS": "ON",
+        "UHI_BUILD_SKSE": "OFF"
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg/master/scripts/vcpkg.schema.json",
+  "name": "universal-hotkey-inspector",
+  "version-semver": "1.0.2",
+  "builtin-baseline": "2f1d605400c8727cc00c15797aba796c88ccd523",
+  "dependencies": [
+    "commonlibsse-ng",
+    "lz4",
+    "zydis",
+    "zlib"
+  ]
+}
