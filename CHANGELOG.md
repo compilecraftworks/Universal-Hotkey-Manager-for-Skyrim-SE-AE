@@ -7,7 +7,7 @@
 - Applied live runtime ControlMap user bindings before loose and built-in defaults, while excluding console, debug, Creation/marketplace, and other unsupported control contexts.
 - Refined Options and the keyboard, mouse, and gamepad views with saved opacity, consistent category styling, compact labels, clearer tooltips, and reliable rename/hotkey editors.
 - Fixed Korean and Chinese glyph setup without requiring Windows' UTF-8 beta locale, while preserving Menu Framework's selected primary font and unrelated settings.
-- Verified source-specific DirectInput, SKSE unified, Windows-VK, XInput/controlmap, overlay, document, and MCM write/rollback paths; completed GPLv3 release metadata and GitHub source publication.
+- Verified source-specific DirectInput, SKSE unified, Windows-VK, XInput/controlmap, overlay, document, and MCM write/rollback paths.
 
 ## 1.0.1 - 2026-08-23
 
