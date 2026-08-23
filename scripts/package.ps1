@@ -55,7 +55,7 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'assets/gamepad.png') `
 
 $rootDocuments = @(
     'LICENSE', 'README.md', 'INSTALL.md', 'CHANGELOG.md', 'CHANGELOG_KO.md', 'THIRD_PARTY_NOTICES.md',
-    'NEXUS_DESCRIPTION_BBCODE.md', 'NEXUS_DESCRIPTION_KO_HTML.html', 'TULLIUS_DESCRIPTION_KO_HTML.md'
+    'NEXUS_DESCRIPTION_BBCODE.md', 'NEXUS_DESCRIPTION_KO_HTML.html', 'TULLIUS_DESCRIPTION_KO_HTML.html'
 )
 foreach ($name in $rootDocuments) {
     Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination $releaseStage
