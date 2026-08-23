@@ -287,9 +287,10 @@ namespace
         std::vector<UHI::HotkeyRecord> runtimeControls)
     {
         if (runtimeControls.empty()) return;
+        const auto customMapPath = std::filesystem::current_path() / "ControlMap_Custom.txt";
         std::error_code customMapError;
         const bool customMapPresent = std::filesystem::is_regular_file(
-            std::filesystem::current_path() / "ControlMap_Custom.txt", customMapError) &&
+            customMapPath, customMapError) &&
             !customMapError;
         std::unordered_map<std::string, std::vector<UHI::HotkeyRecord>> looseByIdentity;
         for (const auto& record : records) {
@@ -302,6 +303,14 @@ namespace
         for (auto& runtime : runtimeControls) {
             const auto identity = RuntimeControlIdentity(runtime);
             runtimeIdentities.insert(identity);
+            if (customMapPresent) {
+                // The binary Custom map is Skyrim's effective user override.
+                // It is deliberately displayed but never edited by UHM.
+                runtime.evidencePath = customMapPath;
+                runtime.evidenceLine = 0;
+                runtime.editable = false;
+                continue;
+            }
             if (const auto found = looseByIdentity.find(identity); found != looseByIdentity.end()) {
                 const auto matchingSource = std::ranges::find_if(found->second,
                     [&](const UHI::HotkeyRecord& source) {

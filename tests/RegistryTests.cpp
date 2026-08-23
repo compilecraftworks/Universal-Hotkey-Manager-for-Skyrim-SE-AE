@@ -191,6 +191,26 @@ int main()
         return 1;
     }
 
+    UHI::Registry staticCandidates;
+    auto staticCandidate = MakeRecord("Static native module", "F4", 60);
+    staticCandidate.detector = "StaticCommonLibInputHandler";
+    staticCandidate.editable = true;
+    staticCandidate.runtimeActive = true;
+    staticCandidate.conflictEligible = true;
+    staticCandidates.Add(std::move(staticCandidate));
+    auto activeSink = MakeRecord("Active native module", "F5", 61);
+    activeSink.detector = "ActiveInputSinkAnalyzer";
+    activeSink.runtimeActive = true;
+    activeSink.conflictEligible = true;
+    staticCandidates.Add(std::move(activeSink));
+    const auto sanitized = staticCandidates.Records();
+    if (sanitized.size() != 2 || sanitized[0].runtimeActive || sanitized[0].editable ||
+        sanitized[0].conflictEligible || !sanitized[1].runtimeActive ||
+        !sanitized[1].conflictEligible) {
+        std::cerr << "Registry did not separate static candidates from active input sinks\n";
+        return 1;
+    }
+
     std::cout << "Registry safety tests passed\n";
     return 0;
 }

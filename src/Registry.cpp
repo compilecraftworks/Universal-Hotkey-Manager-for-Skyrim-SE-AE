@@ -127,6 +127,14 @@ namespace UHI
 
     void Registry::Add(HotkeyRecord record)
     {
+        // Sanitize restored scans as well as newly scanned records. Older
+        // caches could contain static CommonLib candidates marked as active,
+        // which made implementation details look like real hotkeys.
+        if (record.detector == "StaticCommonLibInputHandler") {
+            record.runtimeActive = false;
+            record.editable = false;
+            record.conflictEligible = false;
+        }
         constexpr auto hiddenGameContexts = Context(ActivationContext::console) |
             Context(ActivationContext::debugText) |
             Context(ActivationContext::debugOverlay) | Context(ActivationContext::mapDebug) |

@@ -258,6 +258,15 @@ namespace UHI
                     record.runtimeActive = false;
                     record.editable = false;
                 }
+                // Deep CommonLib disassembly is useful forensic evidence, but
+                // it is not proof that the handler is registered in this game.
+                // Only ActiveInputSinkAnalyzer records captured from the live
+                // sink list may enter the ordinary hotkey views/conflicts.
+                if (record.detector == "StaticCommonLibInputHandler") {
+                    record.runtimeActive = false;
+                    record.editable = false;
+                    record.conflictEligible = false;
+                }
                 record.uiLocalOnly = IsUiLocalInput(record.owner, record.action,
                     record.detector, record.contextMask);
             }

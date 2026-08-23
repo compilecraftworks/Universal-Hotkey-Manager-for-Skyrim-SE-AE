@@ -636,7 +636,16 @@ namespace
         const auto& detector = record.detector;
         if (detector == "BuiltInHotkeyTable")
             return UiText("Built-in controls", "기본 조작표", "内置控制表");
-        if (detector == "ControlMapScanner") return "controlmap.txt";
+        if (detector == "ControlMapScanner") {
+            auto filename = UHI::PathToUtf8(record.evidencePath.filename());
+            std::ranges::transform(filename, filename.begin(), [](const unsigned char character) {
+                return static_cast<char>(std::tolower(character));
+            });
+            if (filename == "controlmap_custom.txt") return "ControlMap_Custom.txt";
+            if (record.stage == UHI::ScanStage::runtime && !record.editable)
+                return "Runtime ControlMap";
+            return "controlmap.txt";
+        }
         if (detector == "StructuredConfigScanner")
             return UiText("Configuration file", "설정 파일", "配置文件");
         if (detector == "PexScanner" || detector == "PexBytecodeScanner") return "Papyrus PEX";

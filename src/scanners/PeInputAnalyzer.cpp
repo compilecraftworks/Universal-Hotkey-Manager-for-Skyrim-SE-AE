@@ -723,8 +723,9 @@ namespace
                 .detector = provenActive ? "ActiveInputSinkAnalyzer" : "StaticCommonLibInputHandler",
                 .confidence = UHI::Confidence::inferred,
                 .evidencePath = target.modulePath, .evidenceLine = target.processEventRva,
-                .stage = UHI::ScanStage::nativePlugins, .editable = false, .runtimeActive = true,
-                .conflictEligible = parsed.conflictEligible, .contextMask = context.mask,
+                .stage = UHI::ScanStage::nativePlugins, .editable = false,
+                .runtimeActive = provenActive,
+                .conflictEligible = provenActive && parsed.conflictEligible, .contextMask = context.mask,
                 .contextConfidence = context.confidence
             });
         }

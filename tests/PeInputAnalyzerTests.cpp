@@ -25,12 +25,12 @@ namespace
 
     void MakePe(const std::filesystem::path& path)
     {
-        std::vector<std::uint8_t> bytes(0xA00U);
+        std::vector<std::uint8_t> bytes(0xC00U);
         Put(bytes, 0, std::uint16_t{ 0x5A4D });
         Put(bytes, 0x3C, std::uint32_t{ 0x80 });
         Put(bytes, 0x80, std::uint32_t{ 0x00004550 });
         Put(bytes, 0x84, std::uint16_t{ 0x8664 });
-        Put(bytes, 0x86, std::uint16_t{ 2 });
+        Put(bytes, 0x86, std::uint16_t{ 3 });
         Put(bytes, 0x94, std::uint16_t{ 0xF0 });
         constexpr std::size_t optional = 0x98;
         Put(bytes, optional, std::uint16_t{ 0x20B });
@@ -39,6 +39,8 @@ namespace
         Put(bytes, optional + 108, std::uint32_t{ 16 });
         Put(bytes, optional + 120, std::uint32_t{ 0x2000 });
         Put(bytes, optional + 124, std::uint32_t{ 40 });
+        Put(bytes, optional + 136, std::uint32_t{ 0x3000 });
+        Put(bytes, optional + 140, std::uint32_t{ 12 });
 
         constexpr std::size_t sections = optional + 0xF0;
         PutString(bytes, sections, ".text");
@@ -54,6 +56,13 @@ namespace
         Put(bytes, idata + 16, std::uint32_t{ 0x400 });
         Put(bytes, idata + 20, std::uint32_t{ 0x600 });
         Put(bytes, idata + 36, std::uint32_t{ 0x40000040 });
+        constexpr std::size_t pdata = idata + 40;
+        PutString(bytes, pdata, ".pdata");
+        Put(bytes, pdata + 8, std::uint32_t{ 0x200 });
+        Put(bytes, pdata + 12, std::uint32_t{ 0x3000 });
+        Put(bytes, pdata + 16, std::uint32_t{ 0x200 });
+        Put(bytes, pdata + 20, std::uint32_t{ 0xA00 });
+        Put(bytes, pdata + 36, std::uint32_t{ 0x40000040 });
 
         // USER32 import descriptor and two 64-bit thunk entries.
         Put(bytes, 0x600, std::uint32_t{ 0x2040 });
@@ -100,6 +109,13 @@ namespace
         bytes[processEvent + 24] = 0x20; bytes[processEvent + 25] = 0x41;
         bytes[processEvent + 26] = 0xC3;
         PutString(bytes, 0x700, "InventoryMenu");
+
+        // IMAGE_RUNTIME_FUNCTION_ENTRY used by the conservative whole-DLL
+        // CommonLib pass. The active-sink test above addresses the same code
+        // directly, while the static pass intentionally walks only .pdata.
+        Put(bytes, 0xA00, std::uint32_t{ 0x1080 });
+        Put(bytes, 0xA04, std::uint32_t{ 0x109B });
+        Put(bytes, 0xA08, std::uint32_t{ 0 });
 
         std::ofstream output(path, std::ios::binary | std::ios::trunc);
         output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
@@ -150,6 +166,12 @@ int main(const int argc, char** argv)
             record.contextMask == static_cast<std::uint32_t>(UHI::ActivationContext::inventory) &&
             record.contextConfidence == UHI::ContextConfidence::inferred;
     });
+    const auto staticHandlers = UHI::Scanners::PeInputAnalyzer{}.ScanStaticInputHandlers(dll);
+    const auto staticF7 = std::ranges::find_if(staticHandlers, [](const auto& record) {
+        return record.binding == "F7" && record.device == "keyboard" &&
+            record.detector == "StaticCommonLibInputHandler" && !record.runtimeActive &&
+            !record.conflictEligible && !record.editable;
+    });
     {
         std::ofstream corrupt(root / "Corrupt.dll", std::ios::binary);
         corrupt << "MZbroken";
@@ -157,6 +179,7 @@ int main(const int argc, char** argv)
     const auto rejected = UHI::Scanners::PeInputAnalyzer{}.Scan(root / "Corrupt.dll");
     std::filesystem::remove_all(root, error);
     if (async == records.end() || registered == records.end() || activeF7 == active.end() ||
+        staticF7 == staticHandlers.end() ||
         !rejected.empty()) {
         std::cerr << "PE input analyzer test failed\n";
         return 1;

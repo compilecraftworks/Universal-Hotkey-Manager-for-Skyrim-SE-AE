@@ -9,7 +9,7 @@ Universal Hotkey Manager for Skyrim SE-AE (UHM) is an ESP-free SKSE plugin that 
 
 Scan your active setup to discover keyboard, mouse, and gamepad bindings from Skyrim controls, mod configuration files, MCM settings, scripts, native plugins, ReShade, ENB, Community Shaders, and more. Browse detected bindings by category, see their likely owner and source, and find genuine conflicts with Skyrim-aware activation-context analysis.
 
-[center][img]https://staticdelivery.nexusmods.com/mods/1704/images/189244/189244-1787425787-562889350.png[/img]
+[center][img]https://staticdelivery.nexusmods.com/mods/1704/images/189244/189244-1787487933-991342625.png[/img]
 [i]Overview and device maps[/i][/center]
 
 [size=4][b]Features[/b][/size]
@@ -53,7 +53,7 @@ UHM displays the resulting live bindings accurately, but keeps Skyrim controls r
 
 Deleting the custom file restores the currently effective [code]controlmap.txt[/code], which may be a mod-provided file rather than Bethesda's archived default. Merely starting the game does not recreate the custom file; changing a binding again in Skyrim's Controls menu does, and UHM will return those live Skyrim bindings to read-only. Use a [code]controlmap.txt[/code] made for your Skyrim runtime because incompatible context layouts can cause broken controls or startup failure.
 
-[center][img]https://staticdelivery.nexusmods.com/mods/1704/images/189244/189244-1787425813-693912486.png[/img]
+[center][img]https://staticdelivery.nexusmods.com/mods/1704/images/189244/189244-1787487937-715270571.png[/img]
 [i]Sortable hotkey manager and source-aware edit controls.[/i][/center]
 
 [size=4][b]Opening-key recovery[/b][/size]
@@ -69,7 +69,7 @@ With MO2 it is normally created at [code]Overwrite/SKSE/Plugins/UniversalHotkeyM
 
 Under MO2 these normally land in [code]Overwrite/SKSE/Plugins/UniversalHotkeyManager/[/code]. The first stores per-file scan results; the second stores the validated visible snapshot. Close the game and delete either or both to force a clean rebuild on the next full scan.
 
-[center][img]https://staticdelivery.nexusmods.com/mods/1704/images/189244/189244-1787425854-1132357725.png[/img]
+[center][img]https://staticdelivery.nexusmods.com/mods/1704/images/189244/189244-1787487940-2026652109.png[/img]
 [i]Scanner, text size, language, opacity, and opening-shortcut settings.[/i][/center]
 
 [size=4][b]Requirements[/b][/size]

@@ -34,6 +34,15 @@ namespace
         return extension == ".dll";
     }
 
+    bool IsUniversalHotkeyManagerModule(const std::filesystem::path& path)
+    {
+        auto filename = UHI::PathToUtf8(path.filename());
+        std::ranges::transform(filename, filename.begin(), [](const unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+        return filename == "universalhotkeymanager.dll";
+    }
+
     constexpr std::array<std::string_view, 6> apiNames{
         "GetAsyncKeyState", "GetKeyState", "RegisterRawInputDevices",
         "SetWindowsHookEx", "DirectInput8Create", "RegisterHotKey"
@@ -343,7 +352,8 @@ namespace
             UHI::AppendScanResults(found, analyzed);
             if (fileProgress) fileProgress(90.0F);
         }
-        if (commonLibInputEvidence && !UHI::ScanCancelled(cancel) &&
+        if (commonLibInputEvidence && !IsUniversalHotkeyManagerModule(path) &&
+            !UHI::ScanCancelled(cancel) &&
             found.size() < UHI::kMaximumCollectedRecords) {
             if (fileProgress) fileProgress(92.0F);
             auto analyzed = UHI::Scanners::PeInputAnalyzer{}.ScanStaticInputHandlers(path, cancel);
