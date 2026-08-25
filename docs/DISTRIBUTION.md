@@ -16,7 +16,7 @@ The complete corresponding source is the public repository at:
 
 <https://github.com/compilecraftworks/Universal-Hotkey-Manager-for-Skyrim-SE-AE>
 
-Each published binary must have a matching immutable Git tag such as `v1.0.3`. The tag contains the source, CMake files, pinned vcpkg metadata, tests, resources, packaging scripts, and notices used for that release. GitHub's automatically generated tag archives may be used as source downloads.
+Each published binary must have a matching immutable Git tag such as `v1.0.4`. The tag contains the source, CMake files, pinned vcpkg metadata, tests, resources, packaging scripts, and notices used for that release. GitHub's automatically generated tag archives may be used as source downloads.
 
 Before publishing a binary:
 
