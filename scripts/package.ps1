@@ -54,14 +54,13 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'assets/gamepad.png') `
     -Destination (Join-Path $releaseStage 'SKSE/Plugins/UniversalHotkeyManager/assets/gamepad.png')
 
 $rootDocuments = @(
-    'LICENSE', 'README.md', 'INSTALL.md', 'CHANGELOG.md', 'CHANGELOG_KO.md', 'THIRD_PARTY_NOTICES.md',
-    'NEXUS_DESCRIPTION_BBCODE.md', 'NEXUS_DESCRIPTION_KO_HTML.html', 'TULLIUS_DESCRIPTION_KO_HTML.html'
+    # Keep the release ZIP installation-focused. Publishing copy and
+    # maintainer-only distribution notes remain in the source repository.
+    'LICENSE', 'README.md', 'INSTALL.md', 'CHANGELOG.md', 'CHANGELOG_KO.md', 'THIRD_PARTY_NOTICES.md'
 )
 foreach ($name in $rootDocuments) {
     Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination $releaseStage
 }
-Copy-Item -LiteralPath (Join-Path $projectRoot 'docs/DISTRIBUTION.md') `
-    -Destination (Join-Path $releaseStage 'DISTRIBUTION.md')
 
 $licensePackages = @(
     'commonlibsse-ng', 'fmt', 'spdlog', 'xbyak', 'zlib', 'lz4', 'zydis', 'zycore', 'rapidcsv'

@@ -31,11 +31,11 @@ If the opening key conflicts, edit `Data/SKSE/Plugins/UniversalHotkeyManager.ini
 
 ## Documentation
 
-- [Installation](INSTALL.md)
-- [Detection scope](docs/detection-scope.md)
-- [Runtime installation](docs/runtime-install.md)
+- [Installation and cache guide](INSTALL.md)
 - [Changelog](CHANGELOG.md) | [한국어 변경 이력](CHANGELOG_KO.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
+
+Additional development and distribution documentation is available in the [GitHub source repository](https://github.com/compilecraftworks/Universal-Hotkey-Manager-for-Skyrim-SE-AE).
 
 ## License and credits
 
