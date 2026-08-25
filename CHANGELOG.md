@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.4 - 2026-08-26
+
+- Updated project documentation and third-party notices for the public GitHub release, including the current CommonLibSSE-NG project link.
+- Streamlined the GitHub README and added the Ko-fi support link.
+
 ## 1.0.3 - 2026-08-23
 
 - Fixed direct opening-shortcut ownership: UHM now performs its Menu Framework open/close transition on Skyrim's UI task queue, consumes the toggle input, and requests first-frame ImGui focus. This prevents the manager from appearing without cursor or input focus when opened outside the Menu Framework panel.

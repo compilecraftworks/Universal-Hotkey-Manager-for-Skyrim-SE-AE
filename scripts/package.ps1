@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '1.0.3',
+    [string]$Version = '1.0.4',
     [string]$BuildDirectory = 'build/skse',
     [string]$OutputDirectory = 'releases'
 )
