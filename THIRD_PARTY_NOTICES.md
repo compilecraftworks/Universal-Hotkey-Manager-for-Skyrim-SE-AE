@@ -2,7 +2,7 @@
 
 Universal Hotkey Manager for Skyrim SE-AE 1.0.3 is licensed under GPL-3.0-or-later and built with the following open-source components. The Release ZIP includes the full project `LICENSE` and the component license texts under `ThirdPartyLicenses/`. Complete corresponding source is published at <https://github.com/compilecraftworks/Universal-Hotkey-Manager-for-Skyrim-SE-AE> under the tag matching the binary version.
 
-- CommonLibSSE-NG - MIT License - <https://github.com/CharmedBaryon/CommonLibSSE-NG>
+- CommonLibSSE-NG - MIT License - <https://github.com/alandtse/CommonLibSSE-NG>
 - fmt - MIT License - <https://github.com/fmtlib/fmt>
 - spdlog - MIT License - <https://github.com/gabime/spdlog>
 - Xbyak - 3-clause BSD License - <https://github.com/herumi/xbyak>
