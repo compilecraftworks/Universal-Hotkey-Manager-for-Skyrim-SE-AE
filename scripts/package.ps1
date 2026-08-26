@@ -54,9 +54,11 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'assets/gamepad.png') `
     -Destination (Join-Path $releaseStage 'SKSE/Plugins/UniversalHotkeyManager/assets/gamepad.png')
 
 $rootDocuments = @(
-    # Keep the release ZIP installation-focused. Publishing copy and
-    # maintainer-only distribution notes remain in the source repository.
-    'LICENSE', 'README.md', 'INSTALL.md', 'CHANGELOG.md', 'CHANGELOG_KO.md', 'THIRD_PARTY_NOTICES.md'
+    # Keep the release ZIP deliberately lean. Installation instructions,
+    # screenshots, changelogs, and publishing copy live with the tagged
+    # source on GitHub. Retain only the licensing/source notice required for
+    # a GPL binary distribution.
+    'LICENSE', 'THIRD_PARTY_NOTICES.md'
 )
 foreach ($name in $rootDocuments) {
     Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination $releaseStage
