@@ -12,3 +12,8 @@
 *.bak
 *.uhi.bak
 CMakeUserPresets.json
+
+# Local publishing copy for external mod sites
+NEXUS_DESCRIPTION_BBCODE.md
+NEXUS_DESCRIPTION_KO_HTML.html
+TULLIUS_DESCRIPTION_KO_HTML.html
