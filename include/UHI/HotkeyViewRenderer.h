@@ -10,7 +10,7 @@ namespace UHI
     struct HotkeyViewState
     {
         bool open{ false };
-        HotkeyCategory category{ HotkeyCategory::interface };
+        HotkeyCategory category{ HotkeyCategory::user_interface };
         std::string_view device{};
         bool conflictsOnly{ false };
     };

@@ -14,7 +14,7 @@ namespace UHI
         character,
         combat,
         sexlab,
-        interface,
+        user_interface,
         external
     };
 

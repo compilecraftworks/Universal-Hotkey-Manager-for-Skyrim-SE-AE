@@ -112,12 +112,12 @@ int main()
         category("Equipment Manager", "Open Outfit Menu") != UHI::HotkeyCategory::character ||
         category("Follower Framework", "Open Follower Menu") != UHI::HotkeyCategory::character ||
         category("SmoothCam", "Toggle Camera") != UHI::HotkeyCategory::environment ||
-        category("SkyUI", "Open inventory") != UHI::HotkeyCategory::interface ||
+        category("SkyUI", "Open inventory") != UHI::HotkeyCategory::user_interface ||
         category("OBody", "Open body preset menu") != UHI::HotkeyCategory::character ||
         category("SOS", "Bend") != UHI::HotkeyCategory::character ||
         category("Private Needs - Orgasm", "Check needs") != UHI::HotkeyCategory::sexlab ||
         category("DD", "Device menu") != UHI::HotkeyCategory::sexlab ||
-        category("HUD Widgets", "Open Settings Menu") != UHI::HotkeyCategory::interface ||
+        category("HUD Widgets", "Open Settings Menu") != UHI::HotkeyCategory::user_interface ||
         category("Community Shaders", "Next blocked shader") != UHI::HotkeyCategory::external) return fail("purpose categories");
 
     const auto menuMask = static_cast<std::uint32_t>(UHI::ActivationContext::menuMode);

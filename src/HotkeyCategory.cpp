@@ -62,7 +62,7 @@ namespace
         if (hint == " character ") return UHI::HotkeyCategory::character;
         if (hint == " combat ") return UHI::HotkeyCategory::combat;
         if (hint == " sexlab ") return UHI::HotkeyCategory::sexlab;
-        if (hint == " interface ") return UHI::HotkeyCategory::interface;
+        if (hint == " interface ") return UHI::HotkeyCategory::user_interface;
         if (hint == " external " || hint == " external tools ") return UHI::HotkeyCategory::external;
         return UHI::HotkeyCategory::all;
     }
@@ -87,7 +87,7 @@ namespace UHI
         // "menu", "equipment" or "body". Resolve known ecosystems first.
         if (ContainsAny(owner, { " skyui ", " sky ui ", " morehud ", " more hud ",
                 " skse menu framework ", " modex ", " dmenu ", " wheeler ",
-                " consoleplusplus ", " console plus plus " })) return HotkeyCategory::interface;
+                " consoleplusplus ", " console plus plus " })) return HotkeyCategory::user_interface;
         if (ContainsAny(owner, { " obody ", " schlongs of skyrim ", " sos ",
                 " erin race ", " skyrim fitting system ", " skyrim vanity system ",
                 " skyrim transmog ", " dynamic armor variants " })) return HotkeyCategory::character;
@@ -170,7 +170,7 @@ namespace UHI
             if (character == bestSpecific) return HotkeyCategory::character;
             return HotkeyCategory::environment;
         }
-        if (interfaceScore > 0) return HotkeyCategory::interface;
+        if (interfaceScore > 0) return HotkeyCategory::user_interface;
         // Do not use Interface as a catch-all. Unclassified gameplay utilities
         // fit the broad Environment tab until stronger evidence is learned.
         return HotkeyCategory::environment;
@@ -185,7 +185,7 @@ namespace UHI
         case HotkeyCategory::character: return "Character";
         case HotkeyCategory::combat: return "Combat";
         case HotkeyCategory::sexlab: return "SexLab";
-        case HotkeyCategory::interface: return "Interface";
+        case HotkeyCategory::user_interface: return "Interface";
         case HotkeyCategory::external: return "External tools";
         }
         return "Interface";

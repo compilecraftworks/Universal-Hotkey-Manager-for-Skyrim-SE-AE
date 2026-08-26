@@ -14,9 +14,6 @@
 #include <d3d11.h>
 #include <wincodec.h>
 #include <wrl/client.h>
-#ifdef interface
-#undef interface
-#endif
 #include <mutex>
 #include <atomic>
 #include <string>
@@ -571,7 +568,7 @@ namespace
             return UiText("SexLab-family framework and animation controls. This tab appears only when detected.",
                 "SexLab 계열 프레임워크와 애니메이션 조작입니다. 설치가 감지될 때만 표시됩니다.",
                 "SexLab 系框架与动画控制。仅在检测到安装时显示。");
-        case UHI::HotkeyCategory::interface:
+        case UHI::HotkeyCategory::user_interface:
             return UiText("Menus, HUD widgets, overlays, notifications, and interface utilities.",
                 "메뉴, HUD 위젯, 오버레이, 알림 및 인터페이스 편의 기능입니다.",
                 "菜单、HUD 小部件、覆盖层、通知与界面工具。");
@@ -593,7 +590,7 @@ namespace
         case UHI::HotkeyCategory::character: return UiText("Character", "캐릭터", "角色");
         case UHI::HotkeyCategory::combat: return UiText("Combat", "전투", "战斗");
         case UHI::HotkeyCategory::sexlab: return "SexLab";
-        case UHI::HotkeyCategory::interface: return UiText("Interface", "인터페이스", "界面");
+        case UHI::HotkeyCategory::user_interface: return UiText("Interface", "인터페이스", "界面");
         case UHI::HotkeyCategory::external: return UiText("External Tools", "외부 도구", "外部工具");
         default: return UiText("All", "전체", "全部");
         }
@@ -607,7 +604,7 @@ namespace
         case UHI::HotkeyCategory::character: return ImVec4(0.35F, 0.29F, 0.53F, alpha);
         case UHI::HotkeyCategory::combat: return ImVec4(0.52F, 0.24F, 0.16F, alpha);
         case UHI::HotkeyCategory::sexlab: return ImVec4(0.50F, 0.22F, 0.43F, alpha);
-        case UHI::HotkeyCategory::interface: return ImVec4(0.52F, 0.36F, 0.12F, alpha);
+        case UHI::HotkeyCategory::user_interface: return ImVec4(0.52F, 0.36F, 0.12F, alpha);
         case UHI::HotkeyCategory::external: return ImVec4(0.10F, 0.40F, 0.53F, alpha);
         default: return ImVec4(0.24F, 0.27F, 0.31F, alpha);
         }
@@ -621,7 +618,7 @@ namespace
         case UHI::HotkeyCategory::character: return ImVec4(0.73F, 0.64F, 1.0F, alpha);
         case UHI::HotkeyCategory::combat: return ImVec4(1.0F, 0.61F, 0.43F, alpha);
         case UHI::HotkeyCategory::sexlab: return ImVec4(1.0F, 0.56F, 0.84F, alpha);
-        case UHI::HotkeyCategory::interface: return ImVec4(1.0F, 0.78F, 0.38F, alpha);
+        case UHI::HotkeyCategory::user_interface: return ImVec4(1.0F, 0.78F, 0.38F, alpha);
         case UHI::HotkeyCategory::external: return ImVec4(0.39F, 0.86F, 1.0F, alpha);
         default: return ImVec4(0.78F, 0.82F, 0.88F, alpha);
         }
@@ -933,7 +930,7 @@ namespace
     {
         switch (category) {
         case UHI::HotkeyCategory::external: return 7;
-        case UHI::HotkeyCategory::interface: return 6;
+        case UHI::HotkeyCategory::user_interface: return 6;
         case UHI::HotkeyCategory::sexlab: return 5;
         case UHI::HotkeyCategory::combat: return 4;
         case UHI::HotkeyCategory::character: return 3;
@@ -1482,7 +1479,7 @@ namespace
         if (output.view) return true;
 
         auto* renderer = RE::BSGraphics::Renderer::GetSingleton();
-        auto* device = renderer ? renderer->data.forwarder : nullptr;
+        auto* device = renderer ? renderer->GetRuntimeData().forwarder : nullptr;
         if (!device) return false;
         if (output.attempted) return false;
         output.attempted = true;
@@ -1530,23 +1527,35 @@ namespace
             return false;
         }
 
-        D3D11_TEXTURE2D_DESC description{};
-        description.Width = output.width;
-        description.Height = output.height;
-        description.MipLevels = 1;
-        description.ArraySize = 1;
-        description.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        description.SampleDesc.Count = 1;
-        description.Usage = D3D11_USAGE_DEFAULT;
-        description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        D3D11_SUBRESOURCE_DATA initialData{};
-        initialData.pSysMem = pixels.data();
-        initialData.SysMemPitch = stride;
+        // CommonLibSSE-NG 6.x exposes the renderer through its ABI-stable
+        // REX::W32 D3D definitions.  Keep the image payload in the native
+        // ImGui-compatible COM pointers below, but create it with the exact
+        // wrapped types required by Skyrim's renderer.
+        REX::W32::D3D11_TEXTURE2D_DESC description{};
+        description.width = output.width;
+        description.height = output.height;
+        description.mipLevels = 1;
+        description.arraySize = 1;
+        description.format = REX::W32::DXGI_FORMAT::DXGI_FORMAT_R8G8B8A8_UNORM;
+        description.sampleDesc.count = 1;
+        description.usage = REX::W32::D3D11_USAGE::D3D11_USAGE_DEFAULT;
+        description.bindFlags = REX::W32::D3D11_BIND_SHADER_RESOURCE;
+        REX::W32::D3D11_SUBRESOURCE_DATA initialData{};
+        initialData.sysMem = pixels.data();
+        initialData.sysMemPitch = stride;
 
-        Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
-        result = device->CreateTexture2D(&description, &initialData, texture.GetAddressOf());
+        REX::W32::ID3D11Texture2D* textureRaw = nullptr;
+        result = device->CreateTexture2D(&description, &initialData, &textureRaw);
         if (SUCCEEDED(result)) {
-            result = device->CreateShaderResourceView(texture.Get(), nullptr, output.view.GetAddressOf());
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+            texture.Attach(reinterpret_cast<ID3D11Texture2D*>(textureRaw));
+
+            REX::W32::ID3D11ShaderResourceView* viewRaw = nullptr;
+            result = device->CreateShaderResourceView(
+                reinterpret_cast<REX::W32::ID3D11Resource*>(textureRaw), nullptr, &viewRaw);
+            if (SUCCEEDED(result)) {
+                output.view.Attach(reinterpret_cast<ID3D11ShaderResourceView*>(viewRaw));
+            }
         }
         if (FAILED(result)) {
             SKSE::log::error("Could not create GPU texture for UI image: {} (HRESULT 0x{:08X})",
@@ -3028,7 +3037,7 @@ namespace
             UHI::HotkeyCategory::character,
             UHI::HotkeyCategory::combat,
             UHI::HotkeyCategory::sexlab,
-            UHI::HotkeyCategory::interface,
+            UHI::HotkeyCategory::user_interface,
             UHI::HotkeyCategory::external
         };
         ImGui::SetWindowFontScale(g_uiScale * 1.10F);

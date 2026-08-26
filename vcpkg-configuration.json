@@ -2,20 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg-configuration.schema.json",
   "default-registry": {
     "kind": "builtin",
-    "baseline": "2f1d605400c8727cc00c15797aba796c88ccd523"
+    "baseline": "ee12231b20c95013c6638d845d04c91559a1d1ff"
   },
-  "registries": [
-    {
-      "kind": "git",
-      "repository": "https://gitlab.com/colorglass/vcpkg-colorglass",
-      "baseline": "6309841a1ce770409708a67a9ba5c26c537d2937",
-      "packages": [
-        "commonlibsse-ng",
-        "commonlibsse-ng-ae",
-        "commonlibsse-ng-se",
-        "commonlibsse-ng-vr",
-        "commonlibsse-ng-flatrim"
-      ]
-    }
-  ]
+  "registries": []
 }

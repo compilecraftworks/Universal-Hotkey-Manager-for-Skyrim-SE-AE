@@ -2,8 +2,9 @@
 
 ## 1.0.4 - 2026-08-26
 
-- Updated project documentation and third-party notices for the public GitHub release, including the current CommonLibSSE-NG project link.
-- Streamlined the GitHub README and added the Ko-fi support link.
+- Updated the build to the pinned CommonLibSSE-NG v6.7.0 release and audited the SE/AE runtime-safe input-sink path.
+- Pinned the vcpkg baseline, CommonLib archive checksum, and reproducible vcpkg bootstrap revision; preserved the upstream dependency closure without independent transitive upgrades.
+- Updated GitHub, license, third-party, and distribution documentation for the public source release, including the current CommonLibSSE-NG link and Ko-fi support link.
 
 ## 1.0.3 - 2026-08-23
 

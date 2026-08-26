@@ -13,7 +13,7 @@ namespace UHI
     {
         const HotkeyRecord* record{};
         std::string displayBinding;
-        HotkeyCategory category{ HotkeyCategory::interface };
+        HotkeyCategory category{ HotkeyCategory::user_interface };
         bool conflict{ false };
         bool conditionalConflict{ false };
         std::vector<const HotkeyRecord*> confirmedPeers;

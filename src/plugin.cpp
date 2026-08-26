@@ -1530,6 +1530,14 @@ namespace
 
     std::vector<UHI::Scanners::ActiveInputSinkTarget> CaptureActiveInputSinks()
     {
+#if !defined(EXCLUSIVE_SKYRIM_FLAT)
+        // This optional scanner inspects arbitrary third-party sink vtables.
+        // There is no type-safe receiver for REL::RelocateVirtual here, so a
+        // cross-runtime or VR build must never guess an inherited vtable slot.
+        // UHM's supported SE/AE build is the verified flat layout below.
+        SKSE::log::warn("Active input-sink snapshot is disabled outside the verified SE/AE flat runtime layout");
+        return {};
+#else
         std::vector<const void*> processEvents;
         try {
             const auto* input = RE::BSInputDeviceManager::GetSingleton();
@@ -1586,6 +1594,7 @@ namespace
         SKSE::log::info("Captured {} unique active mod InputEvent ProcessEvent handlers from {} sinks",
             targets.size(), processEvents.size());
         return targets;
+#endif
     }
 #else
     std::vector<UHI::Scanners::ActiveInputSinkTarget> CaptureActiveInputSinks()
