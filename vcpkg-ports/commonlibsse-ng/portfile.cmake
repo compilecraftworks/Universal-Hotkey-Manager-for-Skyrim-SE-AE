@@ -13,6 +13,7 @@ vcpkg_configure_cmake(
     PREFER_NINJA
     OPTIONS
         -DBUILD_TESTS=OFF
+        -DENABLE_SKYRIM_SE=ON
         -DENABLE_SKYRIM_AE=ON
         -DENABLE_SKYRIM_VR=OFF
         -DSKSE_SUPPORT_XBYAK=ON

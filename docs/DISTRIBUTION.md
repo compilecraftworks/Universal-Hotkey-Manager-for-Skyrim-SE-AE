@@ -6,7 +6,7 @@ Universal Hotkey Manager for Skyrim SE-AE is distributed under GPL-3.0-or-later.
 
 Nexus receives one MO2-ready binary archive:
 
-`Universal Hotkey Manager for Skyrim SE-AE <version> - Release.zip`
+`Universal Hotkey Manager for Skyrim SE-AE <version>.zip`
 
 The archive contains the plugin, default configuration, original device artwork, project `LICENSE`, user documentation, `THIRD_PARTY_NOTICES.md`, and the exact license texts required by the bundled or statically linked third-party components. It does not contain a second source ZIP.
 
@@ -16,7 +16,7 @@ The complete corresponding source is the public repository at:
 
 <https://github.com/compilecraftworks/Universal-Hotkey-Manager-for-Skyrim-SE-AE>
 
-Each published binary must have a matching immutable Git tag such as `v1.0.4`. The tag contains the source, CMake files, pinned vcpkg metadata, tests, resources, packaging scripts, and notices used for that release. GitHub's automatically generated tag archives may be used as source downloads.
+Each published binary must have a matching immutable Git tag such as `v1.0.5`. The tag contains the source, CMake files, pinned vcpkg metadata, tests, resources, packaging scripts, and notices used for that release. GitHub's automatically generated tag archives may be used as source downloads.
 
 Before publishing a binary:
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.5 - 2026-08-26
+
+- Fixed the version-dependent ControlMap input-context boundary: Skyrim 1.5.97 now reads its 17-context layout, while Skyrim 1.6.1130 and later use the 18-context layout introduced with Marketplace.
+- Added explicit SE/AE runtime index translation and boundary regression tests, preventing invalid context access without reducing hotkey scan coverage.
+- Moved the restored-scan reminder from the overview layout into a one-time centered popup with no dimmed background.
+
 ## 1.0.4 - 2026-08-26
 
 - Updated the build to the pinned CommonLibSSE-NG v6.7.0 release and audited the SE/AE runtime-safe input-sink path.

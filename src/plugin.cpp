@@ -8,6 +8,7 @@
 #include "UHI/PathEncoding.h"
 #include "UHI/ConfigBindingParser.h"
 #include "UHI/BindingSerializer.h"
+#include "UHI/SkyrimRuntimeLayout.h"
 #include "UHI/scanners/ControlMapScanner.h"
 #include "UHI/scanners/PeInputAnalyzer.h"
 #include "UHI/ActivationContextInference.h"
@@ -54,6 +55,12 @@ namespace
     // Live Papyrus/VM objects are invalidated while a game is reverting or a
     // save is being loaded.  UHM must never enumerate them during that window.
     std::atomic_bool g_gameTransitioning{ false };
+    // kDataLoaded is early enough for forms and the Papyrus MCM to exist, but
+    // on SE 1.5.97 it is still too early to safely walk ControlMap and VM
+    // objects.  Enable live/runtime collection only from a task queued after
+    // a completed save load or new game.  Static file/PEX/DLL scanning remains
+    // available before then.
+    std::atomic_bool g_runtimeCaptureReady{ false };
     std::atomic<float> g_scanPercent{ 0.0F };
     std::atomic<float> g_scanFilePercent{ 0.0F };
     std::string g_scanStage = "Waiting";
@@ -233,16 +240,26 @@ namespace
     std::vector<UHI::HotkeyRecord> CaptureRuntimeGameControls()
     {
         std::vector<UHI::HotkeyRecord> records;
+        if (!g_runtimeCaptureReady.load()) return records;
         const auto* controlMap = RE::ControlMap::GetSingleton();
         if (!controlMap) return records;
 
         constexpr std::array<std::string_view, 3> devices{ "keyboard", "mouse", "gamepad" };
         const auto looseControlMap = std::filesystem::current_path() / "Data" / "Interface" /
             "Controls" / "PC" / "controlmap.txt";
+        const auto runtimeVersion = REL::Module::get().version();
+        const auto contextLayout = UHI::SkyrimInputContextLayoutForVersion(
+            runtimeVersion.major(), runtimeVersion.minor(), runtimeVersion.patch());
+        if (!contextLayout) {
+            SKSE::log::error("Runtime controls were not inspected because Skyrim {} has an unverified "
+                             "ControlMap input-context layout", runtimeVersion.string());
+            return records;
+        }
         for (std::uint32_t contextIndex = 0;
-            contextIndex < static_cast<std::uint32_t>(RE::UserEvents::INPUT_CONTEXT_ID::kTotal);
+            contextIndex < contextLayout->runtimeContextCount;
             ++contextIndex) {
-            const auto engineContext = static_cast<RE::UserEvents::INPUT_CONTEXT_ID>(contextIndex);
+            const auto engineContext = static_cast<RE::UserEvents::INPUT_CONTEXT_ID>(
+                contextLayout->CanonicalContextIndex(contextIndex));
             const auto context = RuntimeControlContext(engineContext);
             if (!context) continue;
             const auto* inputContext = controlMap->controlMap[contextIndex];
@@ -342,6 +359,7 @@ namespace
 
     void RefreshPublishedRuntimeGameControls(const bool notifyChanged)
     {
+        if (!g_runtimeCaptureReady.load()) return;
         auto runtime = CaptureRuntimeGameControls();
         if (runtime.empty()) return;
         std::shared_ptr<const UHI::Registry> current;
@@ -1825,18 +1843,26 @@ namespace
                 return;
             }
             const auto gameRoot = std::filesystem::current_path();
-            auto runtimeHotkeys = CaptureSexLabRuntimeHotkeys(gameRoot);
-            if (g_gameTransitioning.load()) {
-                FinishScan(false, "Waiting for game load");
-                return;
+            std::vector<UHI::HotkeyRecord> runtimeHotkeys;
+            std::vector<RuntimeMcmValue> runtimeMcmValues;
+            std::vector<UHI::Scanners::ActiveInputSinkTarget> activeInputSinks;
+            std::vector<UHI::HotkeyRecord> runtimeGameControls;
+            if (g_runtimeCaptureReady.load()) {
+                runtimeHotkeys = CaptureSexLabRuntimeHotkeys(gameRoot);
+                if (g_gameTransitioning.load()) {
+                    FinishScan(false, "Waiting for game load");
+                    return;
+                }
+                runtimeMcmValues = CaptureRegisteredMcmValues();
+                if (g_gameTransitioning.load()) {
+                    FinishScan(false, "Waiting for game load");
+                    return;
+                }
+                activeInputSinks = CaptureActiveInputSinks();
+                runtimeGameControls = CaptureRuntimeGameControls();
+            } else {
+                SKSE::log::info("Runtime ControlMap/Papyrus collection deferred until a game is loaded");
             }
-            auto runtimeMcmValues = CaptureRegisteredMcmValues();
-            if (g_gameTransitioning.load()) {
-                FinishScan(false, "Waiting for game load");
-                return;
-            }
-            auto activeInputSinks = CaptureActiveInputSinks();
-            auto runtimeGameControls = CaptureRuntimeGameControls();
             LaunchScanWorker(std::move(currentSaveName), std::move(runtimeHotkeys),
                 std::move(runtimeGameControls),
                 std::move(runtimeMcmValues), std::move(activeInputSinks), automatic);
@@ -2063,6 +2089,7 @@ namespace
         if (message->type == SKSE::MessagingInterface::kPreLoadGame ||
             message->type == SKSE::MessagingInterface::kDeleteGame) {
             g_gameTransitioning = true;
+            g_runtimeCaptureReady = false;
             CancelScan();
             // Close editor state before the VM and input/menu objects begin
             // reverting.  This also prevents a captured key from leaking into
@@ -2084,18 +2111,28 @@ namespace
             std::scoped_lock lock(g_currentSaveMutex);
             g_currentSaveName.clear();
         }
-        const bool runtimeReady = message->type == SKSE::MessagingInterface::kDataLoaded ||
+        if (message->type == SKSE::MessagingInterface::kDataLoaded ||
             message->type == SKSE::MessagingInterface::kPostLoadGame ||
-            message->type == SKSE::MessagingInterface::kNewGame;
-        if (runtimeReady) {
+            message->type == SKSE::MessagingInterface::kNewGame) {
             g_gameTransitioning = false;
-            // The engine's live ControlMap is authoritative for changes made
-            // in Skyrim's own Controls menu. Overlay it onto the already
-            // published cache immediately; this is an in-memory walk, not a
-            // file scan, and therefore does not delay the first UHM frame.
-            RefreshPublishedRuntimeGameControls(
-                message->type == SKSE::MessagingInterface::kPostLoadGame &&
-                g_hasValidatedScanSnapshot.load());
+        }
+        if (message->type == SKSE::MessagingInterface::kPostLoadGame ||
+            message->type == SKSE::MessagingInterface::kNewGame) {
+            // Do not touch ControlMap or live Papyrus objects in kDataLoaded.
+            // Queue one game-thread turn after the completed load instead;
+            // this avoids an SE 1.5.97 race that can crash before the main
+            // menu while preserving authoritative live bindings in-game.
+            const bool notifyChanged = message->type == SKSE::MessagingInterface::kPostLoadGame &&
+                g_hasValidatedScanSnapshot.load();
+            if (const auto* tasks = SKSE::GetTaskInterface()) {
+                tasks->AddTask([notifyChanged] {
+                    if (g_gameTransitioning.load()) return;
+                    g_runtimeCaptureReady = true;
+                    RefreshPublishedRuntimeGameControls(notifyChanged);
+                });
+            } else {
+                SKSE::log::warn("Runtime hotkey collection deferred: task interface unavailable");
+            }
         }
         if (message->type == SKSE::MessagingInterface::kInputLoaded ||
             message->type == SKSE::MessagingInterface::kDataLoaded ||

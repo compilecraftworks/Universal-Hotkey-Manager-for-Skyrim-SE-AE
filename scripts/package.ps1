@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '1.0.4',
+    [string]$Version = '1.0.5',
     [string]$BuildDirectory = 'build/skse',
     [string]$OutputDirectory = 'releases'
 )
@@ -89,7 +89,7 @@ foreach ($item in $externalLicenses.GetEnumerator()) {
     Copy-Item -LiteralPath $item.Value -Destination (Join-Path $releaseStage "ThirdPartyLicenses/$($item.Key)")
 }
 
-$releaseZip = Join-Path $outputRoot "Universal Hotkey Manager for Skyrim SE-AE $Version - Release.zip"
+$releaseZip = Join-Path $outputRoot "Universal Hotkey Manager for Skyrim SE-AE $Version.zip"
 $legacySourceZip = Join-Path $outputRoot "Universal Hotkey Manager for Skyrim SE-AE $Version - Source.zip"
 if (Test-Path -LiteralPath $releaseZip) {
     Remove-Item -LiteralPath $releaseZip -Force

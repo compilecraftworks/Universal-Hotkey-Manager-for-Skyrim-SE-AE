@@ -146,6 +146,8 @@ namespace
     int g_editorPopupOpenNotBeforeFrame{ -1 };
     bool g_openRenamePopup{};
     bool g_openBindingPopup{};
+    std::atomic_bool g_pendingRestoredScanNotice{ false };
+    bool g_visibleRestoredScanNotice{};
     std::atomic_size_t g_pendingChangedHotkeyNotice{};
     std::size_t g_visibleChangedHotkeyNotice{};
     enum class BindingWriteNotice : int
@@ -2860,18 +2862,73 @@ namespace
         if (g_window && !open) {
             g_renderWindowVisible = false;
             g_openingHotkeyCaptureActive = false;
+            g_visibleRestoredScanNotice = false;
             g_visibleChangedHotkeyNotice = 0U;
             SavePendingPreferences();
             g_window->IsOpen = false;
             g_automaticRefreshRequestedForCurrentOpen = false;
         }
-        if (const auto changed = g_pendingChangedHotkeyNotice.exchange(0U); changed > 0U) {
-            g_visibleChangedHotkeyNotice = changed;
+
+        // A restored cache is useful immediately, but it is not a newly
+        // detected hotkey set.  Explain the source once in a dedicated popup
+        // instead of consuming permanent vertical space in the overview.
+        if (g_pendingRestoredScanNotice.exchange(false)) {
+            g_visibleRestoredScanNotice = true;
+        }
+        const char* restoredPopupTitle = UiText(
+            "Previous scan restored##UHM_RESTORED_SCAN_NOTICE",
+            "이전 스캔 복원##UHM_RESTORED_SCAN_NOTICE",
+            "已恢复上次扫描##UHM_RESTORED_SCAN_NOTICE");
+        if (g_visibleRestoredScanNotice && !ImGui::IsPopupOpen(restoredPopupTitle)) {
+            ImGui::OpenPopup(restoredPopupTitle);
+        }
+        bool restoredNoticeOpen = true;
+        ImGui::SetNextWindowSize(ImVec2(720.0F * g_uiScale, 250.0F * g_uiScale), ImGuiCond_Appearing);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
+            ImVec2(34.0F * g_uiScale, 28.0F * g_uiScale));
+        ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+        if (ImGui::BeginPopupModal(restoredPopupTitle, &restoredNoticeOpen, 0)) {
+            g_modalInputActive = true;
+            const bool dismissNotice = ConsumePopupCancelRequest();
+            ImGui::Dummy(ImVec2(0.0F, 18.0F * g_uiScale));
+            RenderCenteredTextLine(UiText(
+                "Previous scan results were restored.",
+                "이전 스캔 결과를 복원했습니다.",
+                "已恢复上次扫描结果。"));
+            RenderCenteredTextLine(UiText(
+                "If the active mod list changed, run a new scan from Options.",
+                "활성 모드 목록을 바꿨다면 옵션에서 다시 스캔하세요.",
+                "如果启用的模组列表已更改，请在选项中重新扫描。"));
+            ImGui::Dummy(ImVec2(0.0F, 30.0F * g_uiScale));
+            const char* okay = UiText("OK", "확인", "确定");
+            const auto okaySize = ScaledButtonSize(okay, 120.0F, 38.0F);
+            ImVec2 restoredAvailable{};
+            ImGui::GetContentRegionAvail(&restoredAvailable);
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
+                (std::max)(0.0F, (restoredAvailable.x - okaySize.x) * 0.5F));
+            if (dismissNotice || ImGui::Button(okay, okaySize)) {
+                g_visibleRestoredScanNotice = false;
+                g_modalInputActive = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+        ImGui::PopStyleColor();
+        ImGui::PopStyleVar();
+        if (!restoredNoticeOpen) {
+            g_visibleRestoredScanNotice = false;
+            g_modalInputActive = false;
+        }
+
+        if (!g_visibleRestoredScanNotice) {
+            if (const auto changed = g_pendingChangedHotkeyNotice.exchange(0U); changed > 0U) {
+                g_visibleChangedHotkeyNotice = changed;
+            }
         }
         // Keep requesting the modal until ImGui confirms it is visible.  A
         // one-frame OpenPopup request can be lost while Menu Framework is
         // changing tabs or closing another popup.
-        if (g_visibleChangedHotkeyNotice > 0U &&
+        if (!g_visibleRestoredScanNotice && g_visibleChangedHotkeyNotice > 0U &&
             !ImGui::IsPopupOpen("##UHM_CHANGED_HOTKEY_NOTICE")) {
             ImGui::OpenPopup("##UHM_CHANGED_HOTKEY_NOTICE");
         }
@@ -2914,7 +2971,8 @@ namespace
         // Binding-write notices are deliberately separate from the editor.
         // Open them only after the editor (and the automatic-scan notice) has
         // closed so Menu Framework never has to resolve two modal stacks.
-        if (g_editorModal == EditorModal::none && g_visibleChangedHotkeyNotice == 0U) {
+        if (g_editorModal == EditorModal::none && !g_visibleRestoredScanNotice &&
+            g_visibleChangedHotkeyNotice == 0U) {
             if (const auto pending = g_pendingBindingWriteNotice.exchange(0);
                 pending != static_cast<int>(BindingWriteNotice::none)) {
                 g_visibleBindingWriteNotice = static_cast<BindingWriteNotice>(pending);
@@ -3180,11 +3238,6 @@ namespace
                     "No scan results are loaded yet. Open the Options tab to inventory the active mod environment. The device map below is always available; bindings are filled in after scanning.",
                     "아직 스캔 결과가 없습니다. 옵션 탭에서 활성 모드 환경을 스캔하세요. 아래 장치 그림은 항상 표시되며 스캔 후 단축키가 채워집니다.",
                     "尚未加载扫描结果。请在选项页扫描当前模组环境。下方设备图始终可见，扫描后会填入快捷键。"));
-            } else if (snapshot && snapshot->restored) {
-                ImGui::TextDisabled("%s", UiText(
-                    "Previous scan restored. Open Options to refresh after changing the active mod list.",
-                    "이전 스캔을 복원했습니다. 활성 모드 목록을 바꿨다면 옵션에서 다시 스캔하세요.",
-                    "已恢复上次扫描。更改启用模组列表后，请在选项中重新扫描。"));
             }
             ImGui::Spacing();
             RenderFilterToolbar();
@@ -3671,6 +3724,7 @@ namespace UHI
         }
         std::scoped_lock lock(g_registryMutex);
         g_registrySnapshot = std::move(snapshot);
+        g_pendingRestoredScanNotice.store(restored);
     }
 
     void SetMenuFrameworkSexLabInstalled(const bool installed) noexcept

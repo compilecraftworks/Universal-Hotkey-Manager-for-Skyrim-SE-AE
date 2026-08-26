@@ -3,6 +3,7 @@
 #include "UHI/LastScanStore.h"
 #include "UHI/SexLabDependency.h"
 #include "UHI/StorageUtilOwnerResolver.h"
+#include "UHI/SkyrimRuntimeLayout.h"
 
 #include <array>
 #include <algorithm>
@@ -55,6 +56,23 @@ int main()
         return 1;
     };
     const auto root = std::filesystem::temp_directory_path() / "uhm_state_dependency_test";
+    const auto seLayout = UHI::SkyrimInputContextLayoutForVersion(1, 5, 97);
+    const auto ae640Layout = UHI::SkyrimInputContextLayoutForVersion(1, 6, 640);
+    const auto ae1129Layout = UHI::SkyrimInputContextLayoutForVersion(1, 6, 1129);
+    const auto ae1130Layout = UHI::SkyrimInputContextLayoutForVersion(1, 6, 1130);
+    const auto ae1170Layout = UHI::SkyrimInputContextLayoutForVersion(1, 6, 1170);
+    if (!seLayout || seLayout->runtimeContextCount != 17 || seLayout->hasMarketplaceContext ||
+        seLayout->CanonicalContextIndex(16) != UHI::kCanonicalFavorContextIndex ||
+        !ae640Layout || ae640Layout->runtimeContextCount != 17 || ae640Layout->hasMarketplaceContext ||
+        ae640Layout->CanonicalContextIndex(16) != UHI::kCanonicalFavorContextIndex ||
+        !ae1129Layout || ae1129Layout->runtimeContextCount != 17 || ae1129Layout->hasMarketplaceContext ||
+        !ae1130Layout || ae1130Layout->runtimeContextCount != 18 || !ae1130Layout->hasMarketplaceContext ||
+        ae1130Layout->CanonicalContextIndex(16) != UHI::kCanonicalMarketplaceContextIndex ||
+        ae1130Layout->CanonicalContextIndex(17) != UHI::kCanonicalFavorContextIndex ||
+        !ae1170Layout || ae1170Layout->runtimeContextCount != 18 || !ae1170Layout->hasMarketplaceContext ||
+        UHI::SkyrimInputContextLayoutForVersion(1, 7, 0).has_value()) {
+        return fail("SE/AE input-context layout boundary");
+    }
     std::error_code error;
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root / "Data" / "MCM" / "Settings", error);
