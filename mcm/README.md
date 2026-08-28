@@ -1,7 +1,9 @@
-# MCM integration
+# Legacy MCM prototype
 
-UHI_MCM.psc is the SkyUI MCM front end. The intended in-game path is:
+`UHI_MCM.psc` is retained only as historical prototype source. It is not built,
+packaged, registered, or used by Universal Hotkey Manager 1.0.6.
 
-ESC → Mod Configuration → Universal Hotkey Manager for Skyrim SE-AE → 전체 스캔
-
-The SKSE DLL listens for UHI_StartScan, runs the four-stage pipeline off the game loading path, and broadcasts UHI_ScanProgress with the active stage name and 0–100 progress. Compile this source with the SkyUI script sources before packaging the .pex file.
+The current release is ESP-free. UHM owns a native Skyrim `IMenu`, renders its
+interface with statically linked Dear ImGui Win32/DX11 backends, and exposes the
+four-stage scanner in the in-game **Options** tab. No SkyUI MCM, compiled PEX,
+or SKSE Menu Framework runtime is required.

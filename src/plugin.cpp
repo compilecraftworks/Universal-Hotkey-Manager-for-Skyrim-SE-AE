@@ -79,10 +79,9 @@ namespace
         static_cast<std::uint8_t>(UHI::UiLanguage::automatic) };
     std::atomic_bool g_openingHotkeyPollStarted{ false };
     // Opening from the focused-window fallback happens on its own polling
-    // thread.  Keep the actual Menu Framework state change on SKSE's UI task
-    // queue and coalesce the input event + polling fallback into one request.
+    // thread. Keep the native menu state change on SKSE's UI task queue and
+    // coalesce the input event + polling fallback into one request.
     std::atomic_bool g_openingTogglePending{ false };
-    std::atomic_bool g_uhmPauseOwned{ false };
     std::atomic_int64_t g_lastOpeningToggleMilliseconds{ -1000 };
     std::atomic_bool g_hasValidatedScanSnapshot{ false };
 
@@ -120,32 +119,6 @@ namespace
     {
         return std::filesystem::current_path() / "Data" / "SKSE" / "Plugins" /
             "UniversalHotkeyManager.ini";
-    }
-
-    std::filesystem::path MenuFrameworkConfigPath()
-    {
-        return std::filesystem::current_path() / "Data" / "SKSE" / "Plugins" /
-            "SKSEMenuFramework.ini";
-    }
-
-    bool EnsureLanguageGlyphRange(const UHI::UiLanguage language)
-    {
-        const auto status = UHI::EnsureMenuFrameworkGlyphRange(
-            MenuFrameworkConfigPath(), language);
-        switch (status) {
-        case UHI::MenuFrameworkGlyphRangeStatus::updated:
-            SKSE::log::info("Enabled the selected UHM language glyph range in SKSE Menu Framework; restart required");
-            return true;
-        case UHI::MenuFrameworkGlyphRangeStatus::configMissing:
-            SKSE::log::warn("SKSE Menu Framework INI was not found; UHM could not enable the selected language glyph range");
-            break;
-        case UHI::MenuFrameworkGlyphRangeStatus::writeFailed:
-            SKSE::log::error("Failed to update the selected language glyph range in SKSE Menu Framework INI");
-            break;
-        default:
-            break;
-        }
-        return false;
     }
 
     std::filesystem::path LastScanPath()
@@ -462,9 +435,6 @@ namespace
         g_uiScale.store(std::clamp(hotkey.uiScale, 0.80F, 1.35F));
         g_windowOpacity.store(std::clamp(hotkey.windowOpacity, 0.35F, 1.0F));
         g_uiLanguage.store(static_cast<std::uint8_t>(hotkey.uiLanguage));
-        if (EnsureLanguageGlyphRange(hotkey.uiLanguage)) {
-            UHI::SetMenuFrameworkFontRestartRequired();
-        }
         SKSE::log::info("UHM opening hotkey changed to {}", UHI::FormatOpeningHotkey(hotkey));
         return true;
     }
@@ -498,15 +468,13 @@ namespace
             }
             const bool toggled = UHI::ToggleMenuFrameworkWindow();
             g_openingTogglePending = false;
-            SKSE::log::info("Opening hotkey {} received via {}; Menu Framework window toggle {}",
+            SKSE::log::info("Opening hotkey {} received via {}; native window toggle {}",
                 UHI::FormatOpeningHotkey(hotkey), sourceText, toggled ? "succeeded" : "failed");
         };
 
-        // Menu Framework owns ImGui input on the UI thread.  Calling its
-        // WindowInterface from an input sink or the asynchronous key polling
-        // thread can render the window while missing its first focus/input
-        // handoff on some Framework builds.  Always marshal normal openings
-        // through SKSE's UI queue instead.
+        // Native IMenu state is owned by the UI thread. Always marshal normal
+        // openings through SKSE's UI queue so focus and cursor ownership are
+        // established in the same frame as the menu open message.
         if (const auto tasks = SKSE::GetTaskInterface()) {
             try {
                 tasks->AddUITask(completeToggle);
@@ -525,29 +493,6 @@ namespace
     }
 
 #ifdef _WIN32
-    void SetUhmGameplayPaused(const bool paused)
-    {
-        const auto tasks = SKSE::GetTaskInterface();
-        if (!tasks) return;
-        tasks->AddTask([paused] {
-            auto* main = RE::Main::GetSingleton();
-            if (!main) return;
-            if (paused) {
-                if (!main->freezeTime) {
-                    main->freezeTime = true;
-                    g_uhmPauseOwned = true;
-                } else {
-                    // A native menu or Menu Framework already owns the pause.
-                    g_uhmPauseOwned = false;
-                }
-                return;
-            }
-            if (!g_uhmPauseOwned.exchange(false)) return;
-            const auto* ui = RE::UI::GetSingleton();
-            if (!ui || !ui->IsApplicationMenuOpen()) main->freezeTime = false;
-        });
-    }
-
     bool KeyDown(const int virtualKey) noexcept
     {
         return (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
@@ -586,7 +531,6 @@ namespace
                 SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
                 bool wasDown = false;
                 std::uint32_t previousCode{};
-                bool previousWindowOpen = false;
                 for (;;) {
                     const auto hotkey = GetOpeningHotkey();
                     const auto virtualKey = ScanCodeToVirtualKey(hotkey.scanCode);
@@ -608,11 +552,6 @@ namespace
                         ModifierMatches(hotkey.shift, hotkey.shiftScanCode, leftShift, rightShift) &&
                         ModifierMatches(hotkey.alt, hotkey.altScanCode, leftAlt, rightAlt)) {
                         ToggleOpeningWindow("focused-window key-state fallback");
-                    }
-                    const bool windowOpen = UHI::IsMenuFrameworkWindowOpen();
-                    if (windowOpen != previousWindowOpen) {
-                        SetUhmGameplayPaused(windowOpen);
-                        previousWindowOpen = windowOpen;
                     }
                     wasDown = down;
                     std::this_thread::sleep_for(std::chrono::milliseconds(12));
@@ -2189,9 +2128,9 @@ namespace
                     UHI::ReleaseMenuFrameworkEscapeCloseSuppression();
                 }
 
-                // Modal state is authoritative.  Menu Framework can update its
-                // public window-open flag one frame later than a popup, so
-                // gating capture on both flags dropped the first real input.
+                // Modal state is authoritative. The render frame can publish a
+                // popup one frame before its visible state is observed here, so
+                // gating capture on both flags would drop the first real input.
                 if (UHI::IsMenuFrameworkModalInputActive()) {
                     if (button->device == RE::INPUT_DEVICE::kKeyboard &&
                         button->idCode == 0x01 && button->IsDown()) {
@@ -2254,9 +2193,18 @@ namespace
                     return RE::BSEventNotifyControl::kStop;
                 }
 
-                if (button->device != RE::INPUT_DEVICE::kKeyboard) continue;
+                const bool windowOpen = UHI::IsMenuFrameworkWindowOpen();
+                if (button->device != RE::INPUT_DEVICE::kKeyboard) {
+                    // Let Skyrim's MenuControls sink translate ordinary mouse
+                    // and gamepad input into the Scaleform events consumed by
+                    // NativeMenu.  The IMenu's modal/menu-context flags keep
+                    // those events away from gameplay.  Returning kStop here
+                    // starves MenuControls and leaves the visible ImGui window
+                    // without a cursor or click focus when opened directly.
+                    continue;
+                }
 
-                if (UHI::IsMenuFrameworkWindowOpen() &&
+                if (windowOpen &&
                     UHI::IsMenuFrameworkOpeningHotkeyCaptureActive()) {
                     if (button->idCode == 0x01 && button->IsDown()) {
                         UHI::CancelMenuFrameworkOpeningHotkeyCapture();
@@ -2279,7 +2227,7 @@ namespace
                 // this window and stop the same press from opening Skyrim's
                 // system menu underneath it.
                 if (button->idCode == 0x01 && button->IsDown() &&
-                    UHI::IsMenuFrameworkWindowOpen()) {
+                    windowOpen) {
                     if (UHI::IsMenuFrameworkEscapeCloseSuppressed())
                         return RE::BSEventNotifyControl::kStop;
                     UHI::CloseMenuFrameworkWindow();
@@ -2300,6 +2248,11 @@ namespace
                     // second handler claim focus in the same frame.
                     return RE::BSEventNotifyControl::kStop;
                 }
+
+                // Ordinary keys must likewise reach MenuControls so the native
+                // IMenu receives navigation/text events.  Popup capture, the
+                // opening shortcut, and Escape were handled and consumed
+                // above; the menu's modal context blocks gameplay commands.
             }
             return RE::BSEventNotifyControl::kContinue;
         }
@@ -2332,7 +2285,7 @@ namespace
                 bool expected = false;
                 if (g_inputSinkRegistered.compare_exchange_strong(expected, true)) {
                     input->AddEventSink<RE::InputEvent*>(&g_inputSink);
-                    // Menu Framework and other UI sinks may stop propagation.
+                    // Native menus and other UI sinks may stop propagation.
                     // UHM must see the event first so its modal capture can
                     // record it and then deliberately block every downstream
                     // shortcut. Outside capture this sink always continues.
@@ -2389,16 +2342,14 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
     InitializeLogging();
     SKSE::Init(skse);
     const auto openingHotkey = UHI::LoadOpeningHotkey(OpeningHotkeyPath());
-    const bool languageGlyphRestartRequired = EnsureLanguageGlyphRange(openingHotkey.uiLanguage);
     g_openingHotkeyPacked.store(PackOpeningHotkey(openingHotkey));
     g_uiScale.store(openingHotkey.uiScale);
     g_windowOpacity.store(openingHotkey.windowOpacity);
     g_uiLanguage.store(static_cast<std::uint8_t>(openingHotkey.uiLanguage));
     SKSE::GetPapyrusInterface()->Register(RegisterPapyrus);
     const bool menuRegistered = UHI::RegisterMenuFrameworkWindow();
-    SKSE::log::info("UHI Menu Framework window registration {}",
+    SKSE::log::info("UHI native ImGui window registration {}",
         menuRegistered ? "succeeded" : "failed");
-    if (languageGlyphRestartRequired) UHI::SetMenuFrameworkFontRestartRequired();
     UHI::SetMenuFrameworkStartScan([] { StartScan(false); });
     UHI::SetMenuFrameworkAutomaticRefresh([] {
         if (g_hasValidatedScanSnapshot.load() && !g_scanRunning.load() &&

@@ -8,8 +8,6 @@ find_package(Zydis CONFIG REQUIRED)
 
 option(UHI_BUILD_TESTS "Build UHI unit tests" ON)
 option(UHI_BUILD_SKSE "Build the CommonLibSSE-NG SKSE plugin" OFF)
-option(UHI_ENABLE_MENU_FRAMEWORK "Enable the SKSE Menu Framework adapter" OFF)
-set(UHI_MENU_FRAMEWORK_ROOT "" CACHE PATH "Deprecated; retained for existing build presets")
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -73,27 +71,26 @@ if(UHI_BUILD_SKSE)
         enable_language(RC)
     endif()
     find_package(CommonLibSSE CONFIG REQUIRED)
+    find_package(imgui CONFIG REQUIRED)
     add_commonlibsse_plugin(UniversalHotkeyManager
         NAME "Universal Hotkey Manager for Skyrim SE-AE"
         AUTHOR "UHI contributors"
         VERSION ${PROJECT_VERSION}
         MINIMUM_SKSE_VERSION 0.0.0.0
-        SOURCES src/plugin.cpp src/MenuFrameworkAdapter.cpp resources/UniversalHotkeyManager.rc
+        SOURCES
+            src/plugin.cpp
+            src/MenuFrameworkAdapter.cpp
+            src/NativeImGuiHost.cpp
+            resources/UniversalHotkeyManager.rc
     )
-    target_link_libraries(UniversalHotkeyManager PRIVATE uhi_core)
+    target_link_libraries(UniversalHotkeyManager PRIVATE uhi_core imgui::imgui)
     if(WIN32)
-        target_link_libraries(UniversalHotkeyManager PRIVATE d3d11 windowscodecs Ole32)
+        target_link_libraries(UniversalHotkeyManager PRIVATE d3d11 dxgi windowscodecs Ole32)
     endif()
     target_include_directories(UniversalHotkeyManager PRIVATE include)
     target_compile_definitions(UniversalHotkeyManager PRIVATE UHI_VERSION="${PROJECT_VERSION}")
     target_precompile_headers(UniversalHotkeyManager PRIVATE <UHI/PCH.h>)
 
-    if(UHI_ENABLE_MENU_FRAMEWORK)
-        target_compile_definitions(UniversalHotkeyManager PRIVATE UHI_ENABLE_MENU_FRAMEWORK=1)
-        # Menu Framework 2.x and 3.x embed Dear ImGui and export its C API.
-        # The vendored official single-header client resolves those exports at
-        # runtime, so UHI must not link the legacy 1.x imgui.dll SDK.
-    endif()
 endif()
 
 if(UHI_BUILD_TESTS)

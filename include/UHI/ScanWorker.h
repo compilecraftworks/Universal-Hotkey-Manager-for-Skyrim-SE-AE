@@ -13,7 +13,7 @@ namespace UHI
     {
 #ifdef _WIN32
         // Scans are explicitly user-triggered while the manager owns the menu
-        // and Menu Framework freezes gameplay. Do not use
+        // and a modal UI freezes gameplay. Do not use
         // THREAD_MODE_BACKGROUND_BEGIN here: it throttles disk I/O severely
         // and makes a large MO2 virtual Data tree appear stuck on one file.
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);

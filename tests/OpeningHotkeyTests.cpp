@@ -6,15 +6,6 @@
 #include <iostream>
 #include <string>
 
-namespace
-{
-    std::string ReadAll(const std::filesystem::path& path)
-    {
-        std::ifstream input(path, std::ios::binary);
-        return { std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>() };
-    }
-}
-
 int main()
 {
     const std::string mixedUtf8 =
@@ -44,41 +35,6 @@ int main()
         output << "[General]\nToggleKey=0x1D\nCtrl=true\n";
     }
     const auto invalid = UHI::LoadOpeningHotkey(path);
-
-    const auto frameworkPath = root / "SKSEMenuFramework.ini";
-    {
-        std::ofstream output(frameworkPath, std::ios::binary | std::ios::trunc);
-        output << "[Fonts]\r\nPrimaryFont = MainFont.ttf\r\n"
-                  "EnableKorean = false ; preserve this comment\r\n"
-                  "EnableChinese = false\r\n[Window]\r\nScale = 1.0\r\n";
-    }
-    if (UHI::EnsureMenuFrameworkGlyphRange(frameworkPath, UHI::UiLanguage::korean) !=
-        UHI::MenuFrameworkGlyphRangeStatus::updated) return 1;
-    const auto koreanEnabled = ReadAll(frameworkPath);
-    if (!koreanEnabled.contains("EnableKorean = true ; preserve this comment\r\n") ||
-        !koreanEnabled.contains("PrimaryFont = MainFont.ttf\r\n") ||
-        !koreanEnabled.contains("[Window]\r\nScale = 1.0\r\n")) return 1;
-    if (UHI::EnsureMenuFrameworkGlyphRange(frameworkPath, UHI::UiLanguage::korean) !=
-        UHI::MenuFrameworkGlyphRangeStatus::alreadyEnabled) return 1;
-
-    {
-        std::ofstream output(frameworkPath, std::ios::binary | std::ios::trunc);
-        output << "[Fonts]\nPrimaryFont=MainFont.ttf\n[Window]\nScale=1.0\n";
-    }
-    if (UHI::EnsureMenuFrameworkGlyphRange(frameworkPath, UHI::UiLanguage::chinese) !=
-        UHI::MenuFrameworkGlyphRangeStatus::updated) return 1;
-    const auto chineseEnabled = ReadAll(frameworkPath);
-    const auto chinesePosition = chineseEnabled.find("EnableChinese = true");
-    const auto windowPosition = chineseEnabled.find("[Window]");
-    if (chinesePosition == std::string::npos || windowPosition == std::string::npos ||
-        chinesePosition > windowPosition) return 1;
-
-    const auto unchangedEnglish = ReadAll(frameworkPath);
-    if (UHI::EnsureMenuFrameworkGlyphRange(frameworkPath, UHI::UiLanguage::english) !=
-        UHI::MenuFrameworkGlyphRangeStatus::notRequired ||
-        ReadAll(frameworkPath) != unchangedEnglish) return 1;
-    if (UHI::EnsureMenuFrameworkGlyphRange(root / "missing.ini", UHI::UiLanguage::korean) !=
-        UHI::MenuFrameworkGlyphRangeStatus::configMissing) return 1;
 
     std::filesystem::remove_all(root, error);
     if (invalid != UHI::OpeningHotkey{}) return 1;

@@ -15,7 +15,7 @@ namespace UHI
         bool conflictsOnly{ false };
     };
 
-    // Framework-neutral rendering contract. The SKSE Menu Framework adapter
+    // Framework-neutral rendering contract. The native ImGui adapter
     // supplies the actual ImGui calls; core code remains testable without D3D.
     class HotkeyViewRenderer
     {

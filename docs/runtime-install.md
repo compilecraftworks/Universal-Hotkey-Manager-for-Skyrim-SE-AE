@@ -1,20 +1,14 @@
 # Runtime installation notes
 
-UHI's DLL is self-contained for scanning and reporting. The ImGui window
-requires SKSE Menu Framework 2.1.1 or later.
+UHM is an ESP-free SKSE plugin with its own Skyrim `IMenu`. Dear ImGui and the
+official Win32/DX11 backends are statically linked into
+`UniversalHotkeyManager.dll`; neither SKSE Menu Framework nor a standalone
+`imgui.dll` is required or loaded.
 
-Install the framework's runtime files through its own MO2 mod entry, not by
-copying them into the UHI mod:
+Install the release through MO2 or Vortex after SKSE64 and Address Library.
+UHM does not launch Skyrim or MO2 during builds.
 
-- `SKSE Menu Framework\SKSE\Plugins\SKSEMenuFramework.dll`
-
-UHI vendors the framework author's official 2.x/3.x single-header client. It
-resolves the ImGui functions exported by `SKSEMenuFramework.dll` at runtime and
-does not link the legacy 1.x `imgui.dll` or `SKSEMenuFramework.lib` SDK.
-
-UHI itself remains ESP-free and does not launch Skyrim or MO2 during builds.
-
-To configure the optional adapter from PowerShell:
+To build the native plugin from PowerShell:
 
 ```powershell
 .\scripts\build.ps1 -WithSkse

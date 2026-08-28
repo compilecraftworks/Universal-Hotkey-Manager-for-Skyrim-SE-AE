@@ -2,11 +2,13 @@
 
 ## 1.0.6 - 2026-08-28
 
+- Replaced the SKSE Menu Framework runtime dependency with UHM's own Skyrim `IMenu` and statically linked Dear ImGui Win32/DX11 host while preserving the existing layout, scaling, language, popup, cache, scanner, and editor behavior.
+- Fixed direct-opening input ownership so mouse, keyboard, and gamepad events reach Skyrim's menu controls without leaking into gameplay; Escape now cancels the active popup/capture first or closes UHM without opening Skyrim's system menu.
 - Expanded active-VFS configuration discovery to supported settings files anywhere below `Data`, while retaining resource/default exclusions and per-file caching.
 - Added name-independent detection for compound keyboard/gamepad setting families such as `_Key`, `_Mod*`, `_GPKey`, and `_GPMod*`, plus ordinary action names placed under dedicated binding sections.
 - Improved generic PEX data-flow through custom getter helpers so MCM/runtime properties retain their semantic action identity when they reach key-map registration APIs.
 - Kept unresolved static PEX/DLL input candidates hidden and read-only until active runtime evidence confirms them, preventing analyzer internals from appearing as hotkeys.
-- Added anonymous regression fixtures and verified representative FLICK, Stage Flow, furniture-start, widget, and native-MCM layouts without adding mod-name-specific detection rules.
+- Added anonymous regression fixtures for representative navigation, scene-start, furniture, widget, staged-flow, and native-MCM layouts without adding any mod-name-specific detection rules.
 
 ## 1.0.5 - 2026-08-26
 

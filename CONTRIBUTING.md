@@ -6,12 +6,11 @@ Thank you for improving Universal Hotkey Manager for Skyrim SE-AE.
 
 1. Install Visual Studio 2022 with the Desktop development with C++ workload.
 2. Install CMake 3.24 or newer and Git.
-3. Obtain the SKSE Menu Framework SDK and pass its directory to `scripts/build.ps1` when it is not already available locally.
-4. Build and run the regression suite:
+3. Bootstrap the pinned vcpkg dependency closure used by the repository.
+4. Build the native Dear ImGui/Skyrim `IMenu` plugin and run the regression suite:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -WithSkse `
-  -MenuFrameworkRoot "C:\path\to\SKSE-Menu-Framework-SDK"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -WithSkse
 ```
 
 Generated dependencies, build trees, caches, release archives, and local IDE files must not be committed. The pinned vcpkg manifest and baseline are the authoritative dependency inputs.

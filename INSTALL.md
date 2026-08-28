@@ -5,19 +5,17 @@
 - Skyrim Special Edition or Anniversary Edition
 - SKSE64 appropriate for the installed game runtime
 - Address Library for SKSE Plugins
-- SKSE Menu Framework 2.1.1 or later
 
-Menu Framework 2.x/3.x embeds ImGui in `SKSEMenuFramework.dll`. UHM does not require or load a separate `imgui.dll`.
+UHM owns its Skyrim `IMenu` and statically links Dear ImGui's Win32/DX11 backends. It does not require SKSE Menu Framework or a separate `imgui.dll`.
 
-The in-game interface defaults to automatic Windows-language detection and supports Korean, English, and Chinese. **Options > Appearance** controls overall text size, main-window opacity, and can fix a language manually. UTF-8 mod names and filesystem paths remain supported without enabling Windows' optional system-wide UTF-8 locale. UHM preserves Menu Framework's `PrimaryFont` and other settings while enabling only the Korean or Chinese glyph range required by the selected language. If UHM changes that range, restart Skyrim once after the notice so Menu Framework can rebuild its font atlas. The configured primary font must contain the requested glyphs.
+The in-game interface defaults to automatic Windows-language detection and supports Korean, English, and Chinese. **Options > Appearance** controls overall text size, main-window opacity, and can fix a language manually. UHM loads the required Windows font and Unicode glyph range directly, so UTF-8 mod names and filesystem paths do not require Windows' optional system-wide UTF-8 locale.
 
 ## Mod Organizer 2
 
 1. Install `Universal Hotkey Manager for Skyrim SE-AE 1.0.6.zip` as a normal mod.
-2. Make sure SKSE Menu Framework is installed and enabled.
-3. Enable Universal Hotkey Manager for Skyrim SE-AE after its requirements.
-4. Start the game through SKSE.
-5. Press `Del` to open the manager, open **Options**, then press **Start full scan**.
+2. Enable Universal Hotkey Manager for Skyrim SE-AE after SKSE64 and Address Library.
+3. Start the game through SKSE.
+4. Press `Del` to open the manager, open **Options**, then press **Start full scan**.
 
 Press `Escape` to close the manager. If a rename, binding, or opening-shortcut capture is active, Escape cancels that input first.
 

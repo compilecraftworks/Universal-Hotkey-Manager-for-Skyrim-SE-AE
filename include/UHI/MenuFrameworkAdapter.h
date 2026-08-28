@@ -37,7 +37,6 @@ namespace UHI
     void SetMenuFrameworkScanStatus(bool running, float percent, float currentFilePercent,
         std::string_view stage, std::string_view path);
     void SetMenuFrameworkChangedHotkeyNotice(std::size_t count) noexcept;
-    void SetMenuFrameworkFontRestartRequired() noexcept;
     void SetMenuFrameworkStartScan(std::function<void()> startScan);
     void SetMenuFrameworkAutomaticRefresh(std::function<void()> refresh);
     void SetMenuFrameworkCancelScan(std::function<void()> cancelScan);

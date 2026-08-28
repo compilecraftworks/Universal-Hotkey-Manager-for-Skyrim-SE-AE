@@ -118,11 +118,6 @@ namespace
     }
 #endif
 
-    std::string ComparableIniLine(std::string line)
-    {
-        if (line.starts_with("\xEF\xBB\xBF")) line.erase(0, 3);
-        return Lower(Trim(std::move(line)));
-    }
 }
 
 namespace UHI
@@ -181,118 +176,6 @@ namespace UHI
         }
 #endif
         return UiLanguage::english;
-    }
-
-    MenuFrameworkGlyphRangeStatus EnsureMenuFrameworkGlyphRange(
-        const std::filesystem::path& path, const UiLanguage language) noexcept
-    {
-        const auto effective = ResolveUiLanguage(language);
-        const char* requiredKey = effective == UiLanguage::korean ? "EnableKorean" :
-            effective == UiLanguage::chinese ? "EnableChinese" : nullptr;
-        if (!requiredKey) return MenuFrameworkGlyphRangeStatus::notRequired;
-
-        try {
-            std::ifstream input(path, std::ios::binary);
-            if (!input) return MenuFrameworkGlyphRangeStatus::configMissing;
-            std::string contents((std::istreambuf_iterator<char>(input)),
-                std::istreambuf_iterator<char>());
-            if (!input.eof() && input.fail()) return MenuFrameworkGlyphRangeStatus::writeFailed;
-            // Windows does not allow MoveFileExW to replace the file while
-            // this stream still owns a non-delete-sharing handle.
-            input.close();
-
-            const std::string newline = contents.find("\r\n") != std::string::npos ? "\r\n" : "\n";
-            const bool endedWithNewline = !contents.empty() && contents.back() == '\n';
-            std::vector<std::string> lines;
-            std::istringstream stream(contents);
-            for (std::string line; std::getline(stream, line);) {
-                if (!line.empty() && line.back() == '\r') line.pop_back();
-                lines.push_back(std::move(line));
-            }
-            if (contents.empty()) lines.clear();
-
-            const auto requiredLower = Lower(requiredKey);
-            bool inFonts = false;
-            bool fontsFound = false;
-            std::optional<std::size_t> insertAt;
-            bool changed = false;
-            for (std::size_t index = 0; index < lines.size(); ++index) {
-                const auto comparable = ComparableIniLine(lines[index]);
-                if (comparable.size() >= 2 && comparable.front() == '[' && comparable.back() == ']') {
-                    if (inFonts && !insertAt) insertAt = index;
-                    inFonts = comparable == "[fonts]";
-                    fontsFound = fontsFound || inFonts;
-                    continue;
-                }
-                if (!inFonts) continue;
-                const auto separator = comparable.find('=');
-                if (separator == std::string::npos ||
-                    Trim(comparable.substr(0, separator)) != requiredLower) continue;
-                auto valueText = comparable.substr(separator + 1);
-                if (const auto comment = valueText.find_first_of(";#");
-                    comment != std::string::npos) valueText.erase(comment);
-                const auto value = Lower(Trim(std::move(valueText)));
-                if (value == "true" || value == "1" || value == "yes" || value == "on") {
-                    return MenuFrameworkGlyphRangeStatus::alreadyEnabled;
-                }
-
-                // Replace only the setting value and preserve indentation plus
-                // any trailing comment from the original framework INI.
-                const auto originalSeparator = lines[index].find('=');
-                if (originalSeparator == std::string::npos) continue;
-                const auto comment = lines[index].find_first_of(";#", originalSeparator + 1);
-                std::string suffix;
-                if (comment != std::string::npos) suffix = " " + Trim(lines[index].substr(comment));
-                lines[index] = lines[index].substr(0, originalSeparator + 1) + " true" + suffix;
-                changed = true;
-                break;
-            }
-
-            if (!changed) {
-                if (!fontsFound) {
-                    if (!lines.empty() && !lines.back().empty()) lines.emplace_back();
-                    lines.emplace_back("[Fonts]");
-                    lines.emplace_back(std::string(requiredKey) + " = true");
-                } else {
-                    const auto position = insertAt.value_or(lines.size());
-                    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(position),
-                        std::string(requiredKey) + " = true");
-                }
-            }
-
-            auto temporary = path;
-            temporary += ".uhi.tmp";
-            std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-            if (!output) return MenuFrameworkGlyphRangeStatus::writeFailed;
-            for (std::size_t index = 0; index < lines.size(); ++index) {
-                output << lines[index];
-                if (index + 1 < lines.size() || endedWithNewline) output << newline;
-            }
-            output.close();
-            if (!output) {
-                std::error_code error;
-                std::filesystem::remove(temporary, error);
-                return MenuFrameworkGlyphRangeStatus::writeFailed;
-            }
-#ifdef _WIN32
-            if (!MoveFileExW(temporary.c_str(), path.c_str(),
-                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-                std::error_code error;
-                std::filesystem::remove(temporary, error);
-                return MenuFrameworkGlyphRangeStatus::writeFailed;
-            }
-#else
-            std::error_code error;
-            std::filesystem::rename(temporary, path, error);
-            if (error) {
-                std::filesystem::remove(temporary, error);
-                return MenuFrameworkGlyphRangeStatus::writeFailed;
-            }
-#endif
-            return MenuFrameworkGlyphRangeStatus::updated;
-        } catch (...) {
-            return MenuFrameworkGlyphRangeStatus::writeFailed;
-        }
     }
 
     OpeningHotkey LoadOpeningHotkey(const std::filesystem::path& path) noexcept

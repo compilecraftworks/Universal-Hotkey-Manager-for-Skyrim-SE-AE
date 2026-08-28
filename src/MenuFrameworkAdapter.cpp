@@ -7,10 +7,9 @@
 #include "UHI/OpeningHotkey.h"
 #include "UHI/InputCodeFormatter.h"
 #include "UHI/PathEncoding.h"
+#include "UHI/NativeImGuiHost.h"
 #include <SKSE/Logger.h>
-#ifdef UHI_ENABLE_MENU_FRAMEWORK
-#include <SKSEMenuFramework.h>
-#include <RE/R/Renderer.h>
+#include <imgui.h>
 #include <d3d11.h>
 #include <wincodec.h>
 #include <wrl/client.h>
@@ -62,7 +61,6 @@ namespace
         options
     };
 
-    SKSEMenuFramework::Model::WindowInterface* g_window = nullptr;
     struct RegistrySnapshot
     {
         std::shared_ptr<const UHI::Registry> registry;
@@ -123,8 +121,7 @@ namespace
     std::atomic_bool g_modalInputActive{ false };
     std::atomic_bool g_cancelActivePopupRequested{ false };
     std::atomic_bool g_renderWindowVisible{ false };
-    // Set whenever UHM is opened outside an already-focused Menu Framework
-    // entry.  The next render frame explicitly gives the ImGui window focus.
+    // The next render frame explicitly gives the native ImGui window focus.
     std::atomic_bool g_focusWindowOnNextRender{ false };
     std::atomic_bool g_suppressWindowCloseUntilEscapeRelease{ false };
     std::atomic_int64_t g_suppressWindowCloseUntilMilliseconds{ 0 };
@@ -155,8 +152,7 @@ namespace
         none,
         gameSaveRequired,
         documentRolledBack,
-        documentRollbackUnverified,
-        fontRestartRequired
+        documentRollbackUnverified
     };
     std::atomic_int g_pendingBindingWriteNotice{};
     BindingWriteNotice g_visibleBindingWriteNotice{ BindingWriteNotice::none };
@@ -179,26 +175,22 @@ namespace
     void SuppressWindowCloseForEscapePress() noexcept
     {
         // The same physical Escape press may be observed once by ImGui and
-        // once by Skyrim's input sink.  Keep it from closing both the popup
-        // and the parent window, but never leave a permanent latch behind if
-        // a particular Menu Framework/input configuration omits the key-up
-        // event.
+        // once by Skyrim's input sink. Keep it from closing both the popup
+        // and the parent window, without leaving a permanent latch behind.
         g_suppressWindowCloseUntilEscapeRelease = true;
         g_suppressWindowCloseUntilMilliseconds.store(MonotonicMilliseconds() + 500);
     }
 
-    bool HasMenuFrameworkContext()
+    bool HasImGuiContext()
     {
         if (ImGui::GetCurrentContext()) {
             return true;
         }
         if (!g_missingImGuiContextLogged) {
-            SKSE::log::error("Menu Framework invoked UHI without an ImGui context; rendering was skipped");
+            SKSE::log::error("UHM native menu rendered without an ImGui context; rendering was skipped");
             g_missingImGuiContextLogged = true;
         }
-        if (g_window) {
-            g_window->IsOpen = false;
-        }
+        UHI::NativeImGuiHost::Close();
         return false;
     }
 
@@ -385,7 +377,7 @@ namespace
         // RenderEditorPopups runs after every device/list child and after the
         // context popup has ended, so the modal can be requested immediately
         // from the stable root-window ID stack.  Deferring to the next frame
-        // loses OpenPopup requests in some SKSE Menu Framework builds.
+        // loses OpenPopup requests when another popup closes in the same frame.
         g_editorPopupOpenNotBeforeFrame = ImGui::GetFrameCount();
         SKSE::log::info("Rename-action popup queued for '{}' ({})", record.owner, record.binding);
     }
@@ -432,13 +424,12 @@ namespace
     void RenderScaledBoldLine(const char* text, const float relativeScale, const ImVec4 color)
     {
         ImGui::SetWindowFontScale(g_uiScale * relativeScale);
-        ImVec2 textPosition{};
-        ImGui::GetCursorScreenPos(&textPosition);
+        const ImVec2 textPosition = ImGui::GetCursorScreenPos();
         ImGui::PushStyleColor(ImGuiCol_Text, color);
         ImGui::TextUnformatted(text);
         ImGui::PopStyleColor();
         const auto length = std::char_traits<char>::length(text);
-        ImGui::ImDrawListManager::AddText_FontPtr(ImGui::GetWindowDrawList(), ImGui::GetFont(),
+        ImGui::GetWindowDrawList()->AddText(ImGui::GetFont(),
             ImGui::GetFontSize(), ImVec2(textPosition.x + 0.75F, textPosition.y), ImGui::GetColorU32(color),
             text, text + length, 0.0F, nullptr);
         ImGui::SetWindowFontScale(g_uiScale);
@@ -458,17 +449,14 @@ namespace
 
     ImVec2 MeasureText(const char* text)
     {
-        ImVec2 measured{};
-        ImGui::CalcTextSize(&measured, text, nullptr, false, -1.0F);
-        return measured;
+        return ImGui::CalcTextSize(text, nullptr, false, -1.0F);
     }
 
     void RenderCenteredTextLine(const std::string_view text, const ImVec4* color = nullptr)
     {
         const std::string line(text);
         const auto measured = MeasureText(line.c_str());
-        ImVec2 available{};
-        ImGui::GetContentRegionAvail(&available);
+        const ImVec2 available = ImGui::GetContentRegionAvail();
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
             (std::max)(0.0F, (available.x - measured.x) * 0.5F));
         if (color) ImGui::PushStyleColor(ImGuiCol_Text, *color);
@@ -493,7 +481,7 @@ namespace
         const float minimumHeight = 0.0F)
     {
         const auto text = MeasureText(label);
-        const auto* style = ImGui::GetStyle();
+        const auto* style = &ImGui::GetStyle();
         const float horizontalPadding = style ? style->FramePadding.x * 2.0F : 16.0F * g_uiScale;
         const float verticalPadding = style ? style->FramePadding.y * 2.0F : 10.0F * g_uiScale;
         return ImVec2((std::max)(minimumWidth * g_uiScale, text.x + horizontalPadding + 8.0F * g_uiScale),
@@ -508,17 +496,15 @@ namespace
         const float fontSize = ImGui::GetFontSize() * 1.08F;
         ImVec2 prefixSize{};
         ImVec2 shortcutSize{};
-        ImGui::ImFontManger::CalcTextSizeA(&prefixSize, ImGui::GetFont(), fontSize,
+        prefixSize = ImGui::GetFont()->CalcTextSizeA(fontSize,
             (std::numeric_limits<float>::max)(), 0.0F,
             prefix.c_str(), prefix.c_str() + prefix.size(), nullptr);
-        ImGui::ImFontManger::CalcTextSizeA(&shortcutSize, ImGui::GetFont(), fontSize,
+        shortcutSize = ImGui::GetFont()->CalcTextSizeA(fontSize,
             (std::numeric_limits<float>::max)(), 0.0F,
             shortcut.c_str(), shortcut.c_str() + shortcut.size(), nullptr);
 
-        ImVec2 windowPosition{};
-        ImVec2 windowSize{};
-        ImGui::GetWindowPos(&windowPosition);
-        ImGui::GetWindowSize(&windowSize);
+        const ImVec2 windowPosition = ImGui::GetWindowPos();
+        const ImVec2 windowSize = ImGui::GetWindowSize();
         const float horizontalPadding = 17.0F * g_uiScale;
         const float verticalPadding = 9.0F * g_uiScale;
         const float rightMargin = 28.0F * g_uiScale;
@@ -530,19 +516,19 @@ namespace
         const ImVec2 minimum(maximum.x - badgeSize.x, maximum.y - badgeSize.y);
         const float rounding = badgeSize.y * 0.30F;
         auto* draw = ImGui::GetWindowDrawList();
-        ImGui::ImDrawListManager::AddRectFilled(draw, minimum, maximum,
+        draw->AddRectFilled(minimum, maximum,
             ImGui::GetColorU32(ImVec4(0.08F, 0.43F, 0.92F, 0.98F)), rounding, 0);
-        ImGui::ImDrawListManager::AddRect(draw, minimum, maximum,
+        draw->AddRect(minimum, maximum,
             ImGui::GetColorU32(ImVec4(0.43F, 0.72F, 1.0F, 0.95F)), rounding, 0,
             1.0F * g_uiScale);
 
         const float textY = minimum.y + (badgeSize.y - (std::max)(prefixSize.y, shortcutSize.y)) * 0.5F;
         const ImVec2 prefixPosition(minimum.x + horizontalPadding, textY);
         const ImVec2 shortcutPosition(prefixPosition.x + prefixSize.x, textY);
-        ImGui::ImDrawListManager::AddText_FontPtr(draw, ImGui::GetFont(), fontSize, prefixPosition,
+        draw->AddText(ImGui::GetFont(), fontSize, prefixPosition,
             ImGui::GetColorU32(ImVec4(1.0F, 1.0F, 1.0F, 1.0F)),
             prefix.c_str(), prefix.c_str() + prefix.size(), 0.0F, nullptr);
-        ImGui::ImDrawListManager::AddText_FontPtr(draw, ImGui::GetFont(), fontSize, shortcutPosition,
+        draw->AddText(ImGui::GetFont(), fontSize, shortcutPosition,
             ImGui::GetColorU32(ImVec4(1.0F, 1.0F, 1.0F, 1.0F)),
             shortcut.c_str(), shortcut.c_str() + shortcut.size(), 0.0F, nullptr);
     }
@@ -1183,19 +1169,19 @@ namespace
         if (text.empty() || maximumWidth <= 1.0F) return {};
 
         ImVec2 measured{};
-        ImGui::ImFontManger::CalcTextSizeA(&measured, ImGui::GetFont(), fontSize,
+        measured = ImGui::GetFont()->CalcTextSizeA(fontSize,
             (std::numeric_limits<float>::max)(), 0.0F, text.data(), text.data() + text.size(), nullptr);
         if (measured.x <= maximumWidth) return std::string(text);
 
         static constexpr std::string_view ellipsis = "...";
         ImVec2 ellipsisSize{};
-        ImGui::ImFontManger::CalcTextSizeA(&ellipsisSize, ImGui::GetFont(), fontSize,
+        ellipsisSize = ImGui::GetFont()->CalcTextSizeA(fontSize,
             (std::numeric_limits<float>::max)(), 0.0F, ellipsis.data(), ellipsis.data() + ellipsis.size(), nullptr);
         if (ellipsisSize.x >= maximumWidth) return {};
 
         const char* remaining = text.data();
         ImVec2 prefixSize{};
-        ImGui::ImFontManger::CalcTextSizeA(&prefixSize, ImGui::GetFont(), fontSize,
+        prefixSize = ImGui::GetFont()->CalcTextSizeA(fontSize,
             maximumWidth - ellipsisSize.x, 0.0F, text.data(), text.data() + text.size(), &remaining);
         if (remaining <= text.data()) return std::string(ellipsis);
         return std::string(text.data(), remaining) + std::string(ellipsis);
@@ -1208,7 +1194,7 @@ namespace
         if (text.empty()) return lines;
 
         ImVec2 measured{};
-        ImGui::ImFontManger::CalcTextSizeA(&measured, ImGui::GetFont(), fontSize,
+        measured = ImGui::GetFont()->CalcTextSizeA(fontSize,
             (std::numeric_limits<float>::max)(), 0.0F, text.data(), text.data() + text.size(), nullptr);
         if (measured.x <= maximumWidth) {
             lines[0] = std::string(text);
@@ -1219,7 +1205,7 @@ namespace
         for (auto position = text.find(' '); position != std::string_view::npos;
              position = text.find(' ', position + 1U)) {
             ImVec2 prefixSize{};
-            ImGui::ImFontManger::CalcTextSizeA(&prefixSize, ImGui::GetFont(), fontSize,
+            prefixSize = ImGui::GetFont()->CalcTextSizeA(fontSize,
                 (std::numeric_limits<float>::max)(), 0.0F, text.data(), text.data() + position, nullptr);
             if (prefixSize.x > maximumWidth) break;
             split = position;
@@ -1239,7 +1225,7 @@ namespace
     {
         const auto visible = EllipsizeVectorText(text, fontSize, maximumWidth);
         if (visible.empty()) return;
-        ImGui::ImDrawListManager::AddText_FontPtr(draw, ImGui::GetFont(), fontSize, position,
+        draw->AddText(ImGui::GetFont(), fontSize, position,
             ImGui::GetColorU32(color), visible.c_str(), visible.c_str() + visible.size(), 0.0F, &clip);
     }
 
@@ -1275,8 +1261,8 @@ namespace
             minimum.y + key.height * unit - 2.0F);
         const auto fill = VectorKeyColor(binding);
         const auto border = ImGui::GetColorU32(BindingBorderColor(binding, 0.92F));
-        ImGui::ImDrawListManager::AddRectFilled(draw, minimum, maximum, fill, 3.0F, 0);
-        ImGui::ImDrawListManager::AddRect(draw, minimum, maximum, border, 3.0F, 0,
+        draw->AddRectFilled(minimum, maximum, fill, 3.0F, 0);
+        draw->AddRect(minimum, maximum, border, 3.0F, 0,
             binding && binding->conflict ? 1.25F : 0.65F);
         // Every device card derives its three text roles from these same
         // window-width-based values. This keeps keyboard, mouse and gamepad
@@ -1287,21 +1273,21 @@ namespace
         const ImVec2 keyTextPosition(minimum.x + 4.0F, minimum.y + 3.0F);
         const char* displayLabel = key.displayLabel ? key.displayLabel : key.label;
         const auto displayLabelLength = std::char_traits<char>::length(displayLabel);
-        ImGui::ImDrawListManager::AddText_FontPtr(draw, ImGui::GetFont(), keyFontSize,
+        draw->AddText(ImGui::GetFont(), keyFontSize,
             keyTextPosition, keyColor,
             displayLabel, displayLabel + displayLabelLength, 0.0F, nullptr);
-        // Menu Framework exposes one default font here. A second sub-pixel-offset
+        // The native host exposes one default font here. A second sub-pixel-offset
         // pass gives the compact key legends a clear bold weight without changing
         // the font used by the rest of the interface.
-        ImGui::ImDrawListManager::AddText_FontPtr(draw, ImGui::GetFont(), keyFontSize,
+        draw->AddText(ImGui::GetFont(), keyFontSize,
             ImVec2(keyTextPosition.x + 0.65F, keyTextPosition.y), keyColor,
             displayLabel, displayLabel + displayLabelLength, 0.0F, nullptr);
-        ImGui::ImDrawListManager::AddText_FontPtr(draw, ImGui::GetFont(), keyFontSize,
+        draw->AddText(ImGui::GetFont(), keyFontSize,
             ImVec2(keyTextPosition.x + 0.28F, keyTextPosition.y + 0.42F), keyColor,
             displayLabel, displayLabel + displayLabelLength, 0.0F, nullptr);
         if (binding) {
             ImVec2 keyLabelMeasure{};
-            ImGui::ImFontManger::CalcTextSizeA(&keyLabelMeasure, ImGui::GetFont(), keyFontSize,
+            keyLabelMeasure = ImGui::GetFont()->CalcTextSizeA(keyFontSize,
                 (std::numeric_limits<float>::max)(), 0.0F,
                 displayLabel, displayLabel + displayLabelLength, nullptr);
             const float ownerLimit = (std::max)(12.0F, maximum.x - keyTextPosition.x -
@@ -1320,10 +1306,10 @@ namespace
                 const auto modifier = EllipsizeVectorText(
                     std::string_view(binding->displayBinding).substr(0, separator), modifierSize, available);
                 ImVec2 modifierMeasure{};
-                ImGui::ImFontManger::CalcTextSizeA(&modifierMeasure, ImGui::GetFont(), modifierSize,
+                modifierMeasure = ImGui::GetFont()->CalcTextSizeA(modifierSize,
                     (std::numeric_limits<float>::max)(), 0.0F,
                     modifier.c_str(), modifier.c_str() + modifier.size(), nullptr);
-                ImGui::ImDrawListManager::AddText_FontPtr(draw, ImGui::GetFont(), modifierSize,
+                draw->AddText(ImGui::GetFont(), modifierSize,
                     ImVec2(maximum.x - modifierMeasure.x - 4.0F,
                         minimum.y + ownerFontSize + 5.0F),
                     ImGui::GetColorU32(CategoryTextColor(binding->category, 0.96F)),
@@ -1408,8 +1394,8 @@ namespace
     void DrawVectorLabel(ImDrawList* draw, const ImVec2 position, const char* label,
         const float size = 10.0F, const ImVec4 color = ImVec4(0.68F, 0.72F, 0.78F, 0.96F))
     {
-        ImGui::ImDrawListManager::AddText_FontPtr(draw, ImGui::GetFont(), size, position,
-            ImGui::GetColorU32(color), label, label + std::char_traits<char>::length(label), 0.0F, nullptr);
+        draw->AddText(ImGui::GetFont(), size, position, ImGui::GetColorU32(color),
+            label, label + std::char_traits<char>::length(label), 0.0F, nullptr);
     }
 
     void DrawVectorBoldLabel(ImDrawList* draw, const ImVec2 position, const char* label,
@@ -1425,8 +1411,8 @@ namespace
         const char* label, const UHI::HotkeyViewEntry* binding, const float rounding,
         const ImDrawFlags flags = 0)
     {
-        ImGui::ImDrawListManager::AddRectFilled(draw, minimum, maximum, VectorKeyColor(binding), rounding, flags);
-        ImGui::ImDrawListManager::AddRect(draw, minimum, maximum,
+        draw->AddRectFilled(minimum, maximum, VectorKeyColor(binding), rounding, flags);
+        draw->AddRect(minimum, maximum,
             ImGui::GetColorU32(BindingBorderColor(binding, 0.92F)), rounding, flags,
             binding && binding->conflict ? 1.25F : 0.75F);
         if (label[0] != '\0') DrawVectorLabel(draw, ImVec2(minimum.x + 5.0F, minimum.y + 4.0F), label);
@@ -1437,8 +1423,8 @@ namespace
     void DrawVectorCircleRegion(ImDrawList* draw, const ImVec2 center, const float radius,
         const char* label, const UHI::HotkeyViewEntry* binding)
     {
-        ImGui::ImDrawListManager::AddCircleFilled(draw, center, radius, VectorKeyColor(binding), 32);
-        ImGui::ImDrawListManager::AddCircle(draw, center, radius,
+        draw->AddCircleFilled(center, radius, VectorKeyColor(binding), 32);
+        draw->AddCircle(center, radius,
             ImGui::GetColorU32(BindingBorderColor(binding, 0.92F)), 32,
             binding && binding->conflict ? 1.25F : 0.75F);
         const float labelWidth = static_cast<float>(std::char_traits<char>::length(label)) * 5.5F;
@@ -1587,7 +1573,7 @@ namespace
         const ImVec2 bodyMax(bodyMin.x + bodyWidth, bodyMin.y + bodyHeight);
         const auto shell = ImGui::GetColorU32(ImVec4(0.105F, 0.125F, 0.155F, 1.0F));
         const auto shellBorder = ImGui::GetColorU32(ImVec4(0.58F, 0.63F, 0.70F, 0.78F));
-        ImGui::ImDrawListManager::AddRectFilled(draw, bodyMin, bodyMax, shell, bodyWidth * 0.47F, 0);
+        draw->AddRectFilled(bodyMin, bodyMax, shell, bodyWidth * 0.47F, 0);
 
         const float buttonBottom = bodyMin.y + bodyHeight * 0.43F;
         const float center = bodyMin.x + bodyWidth * 0.5F;
@@ -1613,7 +1599,7 @@ namespace
         DrawVectorRectRegion(draw, ImVec2(bodyMin.x - sideWidth * 0.55F, bodyMin.y + bodyHeight * 0.63F),
             ImVec2(bodyMin.x + sideWidth * 0.55F, bodyMin.y + bodyHeight * 0.63F + sideHeight),
             "M5", FindVectorBinding(bindings, "M5"), 4.0F);
-        ImGui::ImDrawListManager::AddRect(draw, bodyMin, bodyMax, shellBorder, bodyWidth * 0.47F, 0, 1.1F);
+        draw->AddRect(bodyMin, bodyMax, shellBorder, bodyWidth * 0.47F, 0, 1.1F);
     }
 
     void DrawFallbackVectorGamepad(ImDrawList* draw, const ImVec2 origin, const ImVec2 size,
@@ -1630,13 +1616,13 @@ namespace
         const ImVec2 leftGrip(pad.x + padWidth * 0.25F, pad.y + padHeight * 0.57F);
         const ImVec2 rightGrip(pad.x + padWidth * 0.75F, pad.y + padHeight * 0.57F);
         const ImVec2 gripRadius(padWidth * 0.18F, padHeight * 0.43F);
-        ImGui::ImDrawListManager::AddEllipseFilled(draw, leftGrip, gripRadius, shell, -0.30F, 36);
-        ImGui::ImDrawListManager::AddEllipseFilled(draw, rightGrip, gripRadius, shell, 0.30F, 36);
-        ImGui::ImDrawListManager::AddRectFilled(draw,
+        draw->AddEllipseFilled(leftGrip, gripRadius, shell, -0.30F, 36);
+        draw->AddEllipseFilled(rightGrip, gripRadius, shell, 0.30F, 36);
+        draw->AddRectFilled(
             ImVec2(pad.x + padWidth * 0.18F, pad.y + padHeight * 0.16F),
             ImVec2(pad.x + padWidth * 0.82F, pad.y + padHeight * 0.69F), shell, padHeight * 0.23F, 0);
-        ImGui::ImDrawListManager::AddEllipse(draw, leftGrip, gripRadius, shellBorder, -0.30F, 36, 1.0F);
-        ImGui::ImDrawListManager::AddEllipse(draw, rightGrip, gripRadius, shellBorder, 0.30F, 36, 1.0F);
+        draw->AddEllipse(leftGrip, gripRadius, shellBorder, -0.30F, 36, 1.0F);
+        draw->AddEllipse(rightGrip, gripRadius, shellBorder, 0.30F, 36, 1.0F);
 
         const float shoulderY = pad.y + padHeight * 0.03F;
         const float shoulderW = padWidth * 0.22F;
@@ -1715,7 +1701,7 @@ namespace
         const ImVec2 minimum(origin.x + (size.x - extent.x) * 0.5F,
             contentTop + (maximumHeight - extent.y) * 0.5F);
         const ImVec2 maximum(minimum.x + extent.x, minimum.y + extent.y);
-        ImGui::ImDrawListManager::AddImage(draw, reinterpret_cast<ImTextureID>(image.view.Get()),
+        draw->AddImage(reinterpret_cast<ImTextureID>(image.view.Get()),
             minimum, maximum, ImVec2(0.0F, 0.0F), ImVec2(1.0F, 1.0F),
             ImGui::GetColorU32(ImVec4(0.50F, 0.52F, 0.56F, 0.58F)));
         return { minimum, maximum, extent };
@@ -1741,8 +1727,7 @@ namespace
     float MeasureVectorText(const std::string_view text, const float fontSize)
     {
         if (text.empty()) return 0.0F;
-        ImVec2 measured{};
-        ImGui::ImFontManger::CalcTextSizeA(&measured, ImGui::GetFont(), fontSize,
+        const ImVec2 measured = ImGui::GetFont()->CalcTextSizeA(fontSize,
             (std::numeric_limits<float>::max)(), 0.0F, text.data(), text.data() + text.size(), nullptr);
         return measured.x;
     }
@@ -1757,7 +1742,7 @@ namespace
         const ImVec2 textPosition(center.x - labelWidth * 0.5F, center.y - fontSize * 0.5F);
         const ImVec2 pillMinimum(textPosition.x - 2.5F, textPosition.y - 1.5F);
         const ImVec2 pillMaximum(textPosition.x + labelWidth + 2.5F, textPosition.y + fontSize + 1.5F);
-        ImGui::ImDrawListManager::AddRectFilled(draw, pillMinimum, pillMaximum,
+        draw->AddRectFilled(pillMinimum, pillMaximum,
             ImGui::GetColorU32(ImVec4(0.02F, 0.025F, 0.035F, 0.78F)), 2.5F, 0);
         DrawVectorBoldLabel(draw, textPosition, visibleLabel.c_str(), fontSize,
             DeviceHotspotBorderColor(binding, binding ? 0.98F : 0.78F));
@@ -1807,16 +1792,16 @@ namespace
                 panelOrigin.x + panelSize.x - outerMargin - boxWidth, centerY - boxHeight * 0.5F);
             const ImVec2 maximum(minimum.x + boxWidth, minimum.y + boxHeight);
             const auto color = CategoryTextColor(binding->category);
-            ImGui::ImDrawListManager::AddRectFilled(draw, minimum, maximum,
+            draw->AddRectFilled(minimum, maximum,
                 ImGui::GetColorU32(ImVec4(0.0F, 0.0F, 0.0F, 1.0F)), 3.0F, 0);
-            ImGui::ImDrawListManager::AddRect(draw, minimum, maximum,
+            draw->AddRect(minimum, maximum,
                 ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.72F)), 3.0F, 0, 0.75F);
             const ImVec2 anchor = DeviceImagePoint(image, callout.anchorX, callout.anchorY);
             const ImVec2 edge(callout.left ? maximum.x : minimum.x, centerY);
             const float elbowX = callout.left ? anchor.x - innerGap : anchor.x + innerGap;
-            ImGui::ImDrawListManager::AddLine(draw, anchor, ImVec2(elbowX, anchor.y),
+            draw->AddLine(anchor, ImVec2(elbowX, anchor.y),
                 ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.78F)), 1.0F);
-            ImGui::ImDrawListManager::AddLine(draw, ImVec2(elbowX, anchor.y), edge,
+            draw->AddLine(ImVec2(elbowX, anchor.y), edge,
                 ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.78F)), 1.0F);
             // These sizes are supplied by RenderVectorOverview from the same
             // keyboard unit used by DrawVectorKey.  Fixed pixel sizes looked
@@ -1998,10 +1983,8 @@ namespace
 
     void RenderVectorOverview(const std::vector<UHI::HotkeyViewGroup>& groups)
     {
-        ImVec2 available{};
-        ImGui::GetContentRegionAvail(&available);
-        ImVec2 origin{};
-        ImGui::GetCursorScreenPos(&origin);
+        const ImVec2 available = ImGui::GetContentRegionAvail();
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
         const float width = (std::max)(320.0F, available.x - 16.0F);
         const float keyboardUnit = width / 24.2F;
         const float keyboardHeight = keyboardUnit * 6.55F + 24.0F;
@@ -2221,7 +2204,7 @@ namespace
         const auto bindingButtonSize = ScaledButtonSize(bindingView, 112.0F, 32.0F);
         const float controlHeight = (std::max)({ deviceButtonSize.y, bindingButtonSize.y,
             ImGui::GetFrameHeight(), 32.0F * g_uiScale });
-        const auto* style = ImGui::GetStyle();
+        const auto* style = &ImGui::GetStyle();
         const float spacing = style ? style->ItemSpacing.x : 8.0F * g_uiScale;
         const float checkMark = ImGui::GetFrameHeight();
         const float checkWidth = MeasureText(conflictsOnly).x + MeasureText(overlapsOnly).x +
@@ -2239,8 +2222,7 @@ namespace
         const bool visible = ImGui::BeginChild("BindingFilterToolbar", ImVec2(0.0F, toolbarHeight), false,
             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         if (visible) {
-            ImVec2 toolbarAvailable{};
-            ImGui::GetContentRegionAvail(&toolbarAvailable);
+            const ImVec2 toolbarAvailable = ImGui::GetContentRegionAvail();
             ImGui::SetCursorPosY(ImGui::GetCursorPosY() +
                 (std::max)(0.0F, (toolbarAvailable.y - controlHeight) * 0.5F));
         }
@@ -2493,9 +2475,9 @@ namespace
         std::optional<UHI::HotkeyRecord> contextRequestRecord;
         const bool bindingContextVisible = ImGui::BeginPopup("##UHM_BINDING_CONTEXT");
         if (bindingContextVisible) {
-            // Do not consume a popup request until Menu Framework confirms it
-            // is actually visible.  Requests made from vector hotspots can be
-            // deferred by the framework's popup stack for one or more frames.
+            // Do not consume a popup request until ImGui confirms it is visible.
+            // Requests made from vector hotspots can be deferred by the popup
+            // stack for one or more frames.
             g_openBindingContextPopup = false;
             if (ConsumePopupCancelRequest()) {
                 ImGui::CloseCurrentPopup();
@@ -2574,13 +2556,12 @@ namespace
                 RenderCenteredTextLine(renameModLine);
                 RenderCenteredTextLine(renameKeyLine);
                 ImGui::Dummy(ImVec2(0.0F, 22.0F * g_uiScale));
-                ImVec2 renameAvailable{};
-                ImGui::GetContentRegionAvail(&renameAvailable);
+                const ImVec2 renameAvailable = ImGui::GetContentRegionAvail();
                 const float renameInputWidth = (std::min)(renameAvailable.x, 680.0F * g_uiScale);
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                     (std::max)(0.0F, (renameAvailable.x - renameInputWidth) * 0.5F));
                 const auto renameTextSize = MeasureText(g_renameActionValue);
-                const auto* renameStyle = ImGui::GetStyle();
+                const auto* renameStyle = &ImGui::GetStyle();
                 const float renamePaddingY = renameStyle ? renameStyle->FramePadding.y : 6.0F * g_uiScale;
                 const float renamePaddingX = (std::max)(renameStyle ? renameStyle->FramePadding.x :
                     8.0F * g_uiScale, (renameInputWidth - renameTextSize.x) * 0.5F);
@@ -2610,11 +2591,10 @@ namespace
                 const auto applySize = ScaledButtonSize(applyLabel, 110.0F, 38.0F);
                 const auto automaticSize = ScaledButtonSize(automaticLabel, 170.0F, 38.0F);
                 const auto cancelSize = ScaledButtonSize(cancelLabel, 110.0F, 38.0F);
-                const auto* popupStyle = ImGui::GetStyle();
+                const auto* popupStyle = &ImGui::GetStyle();
                 const float popupSpacing = popupStyle ? popupStyle->ItemSpacing.x : 8.0F * g_uiScale;
                 const float buttonGroupWidth = applySize.x + automaticSize.x + cancelSize.x + popupSpacing * 2.0F;
-                ImVec2 popupAvailable{};
-                ImGui::GetContentRegionAvail(&popupAvailable);
+                const ImVec2 popupAvailable = ImGui::GetContentRegionAvail();
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                     (std::max)(0.0F, (popupAvailable.x - buttonGroupWidth) * 0.5F));
                 if (ImGui::Button(applyLabel, applySize)) applyRename();
@@ -2690,8 +2670,7 @@ namespace
                     "키보드·마우스·게임패드 입력을 누르세요...",
                     "请按下键盘、鼠标或手柄输入...") :
                     (g_bindingCaptureDisplay.empty() ? record.binding : g_bindingCaptureDisplay);
-                ImVec2 captureAvailable{};
-                ImGui::GetContentRegionAvail(&captureAvailable);
+                const ImVec2 captureAvailable = ImGui::GetContentRegionAvail();
                 const float captureWidth = (std::min)(captureAvailable.x, 720.0F * g_uiScale);
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                     (std::max)(0.0F, (captureAvailable.x - captureWidth) * 0.5F));
@@ -2716,10 +2695,9 @@ namespace
                 const char* cancelLabel = UiText("Cancel", "취소", "取消");
                 const auto saveSize = ScaledButtonSize(saveLabel, 140.0F, 38.0F);
                 const auto cancelSize = ScaledButtonSize(cancelLabel, 110.0F, 38.0F);
-                const auto* popupStyle = ImGui::GetStyle();
+                const auto* popupStyle = &ImGui::GetStyle();
                 const float popupSpacing = popupStyle ? popupStyle->ItemSpacing.x : 8.0F * g_uiScale;
-                ImVec2 popupAvailable{};
-                ImGui::GetContentRegionAvail(&popupAvailable);
+                const ImVec2 popupAvailable = ImGui::GetContentRegionAvail();
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (std::max)(0.0F,
                     (popupAvailable.x - saveSize.x - cancelSize.x - popupSpacing) * 0.5F));
                 const bool writePending = g_bindingWritePending.load();
@@ -2784,7 +2762,7 @@ namespace
 
     void __stdcall RenderHotkeyView()
     {
-        if (!HasMenuFrameworkContext()) {
+        if (!HasImGuiContext()) {
             return;
         }
         g_escapeConsumedByPopupThisFrame = false;
@@ -2797,7 +2775,7 @@ namespace
             snapshot = g_registrySnapshot;
         }
         const auto registry = snapshot ? snapshot->registry : nullptr;
-        const auto* io = ImGui::GetIO();
+        const auto* io = &ImGui::GetIO();
         if (io) {
             // Open at the large, centered working size used by the full device
             // overview. The former 1800x1050 ceiling made the window look tiny
@@ -2859,13 +2837,13 @@ namespace
         // refresh runs after a completed save load instead of surprising the
         // user with a late modal while they are already using this window.
         if (open) g_automaticRefreshRequestedForCurrentOpen = true;
-        if (g_window && !open) {
+        if (!open) {
             g_renderWindowVisible = false;
             g_openingHotkeyCaptureActive = false;
             g_visibleRestoredScanNotice = false;
             g_visibleChangedHotkeyNotice = 0U;
             SavePendingPreferences();
-            g_window->IsOpen = false;
+            UHI::NativeImGuiHost::Close();
             g_automaticRefreshRequestedForCurrentOpen = false;
         }
 
@@ -2902,8 +2880,7 @@ namespace
             ImGui::Dummy(ImVec2(0.0F, 30.0F * g_uiScale));
             const char* okay = UiText("OK", "확인", "确定");
             const auto okaySize = ScaledButtonSize(okay, 120.0F, 38.0F);
-            ImVec2 restoredAvailable{};
-            ImGui::GetContentRegionAvail(&restoredAvailable);
+            const ImVec2 restoredAvailable = ImGui::GetContentRegionAvail();
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                 (std::max)(0.0F, (restoredAvailable.x - okaySize.x) * 0.5F));
             if (dismissNotice || ImGui::Button(okay, okaySize)) {
@@ -2926,7 +2903,7 @@ namespace
             }
         }
         // Keep requesting the modal until ImGui confirms it is visible.  A
-        // one-frame OpenPopup request can be lost while Menu Framework is
+        // one-frame OpenPopup request can be lost while the popup stack is
         // changing tabs or closing another popup.
         if (!g_visibleRestoredScanNotice && g_visibleChangedHotkeyNotice > 0U &&
             !ImGui::IsPopupOpen("##UHM_CHANGED_HOTKEY_NOTICE")) {
@@ -2950,8 +2927,7 @@ namespace
             ImGui::Dummy(ImVec2(0.0F, 36.0F * g_uiScale));
             const char* okay = UiText("OK", "확인", "确定");
             const auto okaySize = ScaledButtonSize(okay, 120.0F, 38.0F);
-            ImVec2 noticeAvailable{};
-            ImGui::GetContentRegionAvail(&noticeAvailable);
+            const ImVec2 noticeAvailable = ImGui::GetContentRegionAvail();
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                 (std::max)(0.0F, (noticeAvailable.x - okaySize.x) * 0.5F));
             if (dismissNotice || ImGui::Button(okay, okaySize)) {
@@ -2970,7 +2946,7 @@ namespace
 
         // Binding-write notices are deliberately separate from the editor.
         // Open them only after the editor (and the automatic-scan notice) has
-        // closed so Menu Framework never has to resolve two modal stacks.
+        // closed so ImGui never has to resolve two modal stacks.
         if (g_editorModal == EditorModal::none && !g_visibleRestoredScanNotice &&
             g_visibleChangedHotkeyNotice == 0U) {
             if (const auto pending = g_pendingBindingWriteNotice.exchange(0);
@@ -3014,12 +2990,6 @@ namespace
                     "MCM 同步失败，且无法确认原快捷键是否已恢复。\n继续前请检查原始设置文件。");
                 messageColor = ImVec4(1.0F, 0.40F, 0.34F, 1.0F);
                 break;
-            case BindingWriteNotice::fontRestartRequired:
-                // Keep this first-run message ASCII-only: it is shown exactly
-                // when the active atlas may not contain the selected CJK range.
-                message = "Language glyph support was enabled in SKSE Menu Framework.\n"
-                    "Restart Skyrim once to apply it.";
-                break;
             default:
                 message = UiText("The hotkey operation has completed.",
                     "단축키 작업이 완료되었습니다.", "快捷键操作已完成。");
@@ -3033,8 +3003,7 @@ namespace
                 const auto newline = messageLines.find('\n', lineStart);
                 const auto line = messageLines.substr(lineStart,
                     newline == std::string::npos ? std::string::npos : newline - lineStart);
-                ImVec2 lineAvailable{};
-                ImGui::GetContentRegionAvail(&lineAvailable);
+                const ImVec2 lineAvailable = ImGui::GetContentRegionAvail();
                 const auto lineSize = MeasureText(line.c_str());
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                     (std::max)(0.0F, (lineAvailable.x - lineSize.x) * 0.5F));
@@ -3046,8 +3015,7 @@ namespace
             ImGui::Dummy(ImVec2(0.0F, 48.0F * g_uiScale));
             const char* okay = UiText("OK", "확인", "确定");
             const auto okaySize = ScaledButtonSize(okay, 130.0F, 40.0F);
-            ImVec2 noticeAvailable{};
-            ImGui::GetContentRegionAvail(&noticeAvailable);
+            const ImVec2 noticeAvailable = ImGui::GetContentRegionAvail();
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                 (std::max)(0.0F, (noticeAvailable.x - okaySize.x) * 0.5F));
             if (dismissNotice || ImGui::Button(okay, okaySize)) {
@@ -3167,8 +3135,7 @@ namespace
             const char* conflictLabel = UiText("CONFLICTS", "충돌", "冲突");
             const char* editableLabel = UiText("EDITABLE", "변경 가능", "可修改");
             const char* readOnlyLabel = UiText("READ-ONLY", "읽기 전용", "只读");
-            ImVec2 overviewHeaderAvailable{};
-            ImGui::GetContentRegionAvail(&overviewHeaderAvailable);
+            const ImVec2 overviewHeaderAvailable = ImGui::GetContentRegionAvail();
             const float overviewHeaderMargin = MeasureText(UiText("M", "가", "字")).x;
             const float overviewHeaderUsableWidth = (std::max)(0.0F,
                 overviewHeaderAvailable.x - overviewHeaderMargin * 2.0F);
@@ -3211,8 +3178,7 @@ namespace
                     ImGui::TableNextRow();
                     for (const auto index : metricIndices) {
                         ImGui::TableSetColumnIndex(static_cast<int>(index));
-                        ImVec2 cellAvailable{};
-                        ImGui::GetContentRegionAvail(&cellAvailable);
+                        const ImVec2 cellAvailable = ImGui::GetContentRegionAvail();
                         ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                             (std::max)(0.0F, cellAvailable.x - MeasureText(metricLabels[index]).x));
                         ImGui::TextUnformatted(metricLabels[index]);
@@ -3222,8 +3188,7 @@ namespace
                     for (const auto index : metricIndices) {
                         ImGui::TableSetColumnIndex(static_cast<int>(index));
                         const auto number = std::to_string(metricValues[index]);
-                        ImVec2 cellAvailable{};
-                        ImGui::GetContentRegionAvail(&cellAvailable);
+                        const ImVec2 cellAvailable = ImGui::GetContentRegionAvail();
                         ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                             (std::max)(0.0F, cellAvailable.x - MeasureText(number.c_str()).x));
                         ImGui::TextColored(metricColors[index], "%s", number.c_str());
@@ -3268,8 +3233,7 @@ namespace
                 preferencesDraft = g_openingHotkeyDraft;
             }
 
-            ImVec2 optionsAvailable{};
-            ImGui::GetContentRegionAvail(&optionsAvailable);
+            const ImVec2 optionsAvailable = ImGui::GetContentRegionAvail();
             const float optionsWidth = optionsAvailable.x;
             const float optionsSideMargin = std::clamp(optionsWidth * 0.025F,
                 24.0F * g_uiScale, 56.0F * g_uiScale);
@@ -3311,10 +3275,9 @@ namespace
                     if (optionGroupIndex++ > 0U) {
                         ImGui::TableNextRow(ImGuiTableRowFlags_None, optionSeparatorHeight);
                         ImGui::TableSetColumnIndex(1);
-                        ImVec2 separatorOrigin{};
-                        ImGui::GetCursorScreenPos(&separatorOrigin);
+                        const ImVec2 separatorOrigin = ImGui::GetCursorScreenPos();
                         const float separatorY = separatorOrigin.y + optionSeparatorHeight * 0.5F;
-                        ImGui::ImDrawListManager::AddLine(ImGui::GetWindowDrawList(),
+                        ImGui::GetWindowDrawList()->AddLine(
                             ImVec2(separatorOrigin.x, separatorY),
                             ImVec2(separatorOrigin.x + (std::max)(80.0F,
                                 optionsInnerWidth - 40.0F * g_uiScale), separatorY),
@@ -3406,8 +3369,7 @@ namespace
                             std::clamp(scanFilePercent, 0.0F, 100.0F));
                         displayPath += fileProgressText;
                         displayPath += ')';
-                        ImVec2 pathAvailable{};
-                        ImGui::GetContentRegionAvail(&pathAvailable);
+                        const ImVec2 pathAvailable = ImGui::GetContentRegionAvail();
                         const float measuredWidth = MeasureText(displayPath.c_str()).x;
                         const float usableWidth = (std::max)(1.0F,
                             pathAvailable.x - 4.0F * g_uiScale);
@@ -3431,8 +3393,7 @@ namespace
                 const char* textSizeLabel = UiText("Text size (range 80% to 135%)",
                     "글자 크기 (범위 80%~135%)", "文字大小（范围 80% 至 135%）");
                 const float resetWidth = ScaledButtonSize(UiText("Reset", "초기화", "重置"), 92.0F, 34.0F).x;
-                ImVec2 appearanceAvailable{};
-                ImGui::GetContentRegionAvail(&appearanceAvailable);
+                const ImVec2 appearanceAvailable = ImGui::GetContentRegionAvail();
                 const float textSizeLabelWidth = (std::max)(260.0F * g_uiScale,
                     MeasureText(textSizeLabel).x + 20.0F * g_uiScale);
                 ImGui::AlignTextToFramePadding();
@@ -3496,8 +3457,7 @@ namespace
                         "관리 창을 열고 닫는 정확한 키보드 단축키를 지정합니다.",
                         "选择用于打开和关闭管理窗口的精确键盘快捷键。"),
                     optionGroupHeight);
-                ImVec2 shortcutAvailable{};
-                ImGui::GetContentRegionAvail(&shortcutAvailable);
+                const ImVec2 shortcutAvailable = ImGui::GetContentRegionAvail();
                 const bool capturing = UHI::IsMenuFrameworkOpeningHotkeyCaptureActive();
                 const std::string captureLabel = capturing ?
                     UiText("Press a keyboard shortcut...", "변경할 단축키를 누르세요...", "请按下新的键盘快捷键...") :
@@ -3564,8 +3524,7 @@ namespace
             const char* categoryConflictLabel = UiText("CONFLICTS", "충돌", "冲突");
             const char* categoryEditableLabel = UiText("EDITABLE", "변경 가능", "可修改");
             const char* categoryReadOnlyLabel = UiText("READ-ONLY", "읽기 전용", "只读");
-            ImVec2 categoryHeaderAvailable{};
-            ImGui::GetContentRegionAvail(&categoryHeaderAvailable);
+            const ImVec2 categoryHeaderAvailable = ImGui::GetContentRegionAvail();
             const float categoryHeaderMargin = MeasureText(UiText("M", "가", "字")).x;
             const float categoryHeaderUsableWidth = (std::max)(0.0F,
                 categoryHeaderAvailable.x - categoryHeaderMargin * 2.0F);
@@ -3604,8 +3563,7 @@ namespace
                     ImGui::TableNextRow();
                     for (const auto index : metricIndices) {
                         ImGui::TableSetColumnIndex(static_cast<int>(index));
-                        ImVec2 cellAvailable{};
-                        ImGui::GetContentRegionAvail(&cellAvailable);
+                        const ImVec2 cellAvailable = ImGui::GetContentRegionAvail();
                         ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                             (std::max)(0.0F, cellAvailable.x - MeasureText(metricLabels[index]).x));
                         ImGui::TextUnformatted(metricLabels[index]);
@@ -3615,8 +3573,7 @@ namespace
                     for (const auto index : metricIndices) {
                         ImGui::TableSetColumnIndex(static_cast<int>(index));
                         const auto number = std::to_string(metricValues[index]);
-                        ImVec2 cellAvailable{};
-                        ImGui::GetContentRegionAvail(&cellAvailable);
+                        const ImVec2 cellAvailable = ImGui::GetContentRegionAvail();
                         ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                             (std::max)(0.0F, cellAvailable.x - MeasureText(number.c_str()).x));
                         ImGui::TextColored(metricColors[index], "%s", number.c_str());
@@ -3654,8 +3611,8 @@ namespace
             RenderOverviewShortcutBadge(badgeHotkey);
         }
         RenderEditorPopups();
-        // Menu Framework can own Escape before Skyrim's input sink sees it.
-        // Close the parent here as a reliable fallback, but only when no popup
+        // ImGui can observe Escape before Skyrim's input sink sees it. Close
+        // the parent here as a reliable fallback, but only when no popup
         // or capture owns this physical press. Popup cancellation sets the
         // suppression latch, preventing one Escape from closing two layers.
         if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
@@ -3672,44 +3629,13 @@ namespace
         ImGui::PopStyleVar(9);
     }
 
-    void __stdcall RenderFrameworkEntry()
-    {
-        if (!HasMenuFrameworkContext()) {
-            return;
-        }
-        ImGui::TextUnformatted("Universal Hotkey Manager for Skyrim SE-AE");
-        ImGui::TextWrapped("%s", UiText("Open the manager here if its configured keyboard shortcut is unavailable.",
-            "설정한 키보드 단축키를 사용할 수 없을 때 여기서 관리 창을 여세요.",
-            "如果设定的键盘快捷键不可用，请在此打开管理窗口。"));
-        if (ImGui::Button(UiText("Universal Hotkey Manager", "Universal Hotkey Manager", "Universal Hotkey Manager")) && g_window) {
-            g_automaticRefreshRequestedForCurrentOpen = false;
-            g_renderWindowVisible = true;
-            g_focusWindowOnNextRender = true;
-            g_window->IsOpen = true;
-        }
-    }
 }
 
 namespace UHI
 {
     bool RegisterMenuFrameworkWindow()
     {
-        if (!g_window) {
-            // UHI no longer imports the framework DLL. Refresh the official
-            // header's module handle after SKSE has loaded every plugin.
-            menuFramework = GetModuleHandleW(L"SKSEMenuFramework.dll");
-            if (!menuFramework) {
-                SKSE::log::error("SKSE Menu Framework is not loaded; UHM window registration skipped");
-                return false;
-            }
-            SKSEMenuFramework::SetSection("Universal Hotkey Manager for Skyrim SE-AE");
-            g_window = SKSEMenuFramework::AddWindow(RenderHotkeyView);
-            SKSEMenuFramework::AddSectionItem("Universal Hotkey Manager for Skyrim SE-AE", RenderFrameworkEntry);
-            // Delete is the default UHM toggle key. The framework owns focus and
-            // input routing once the window is open; no game launch is needed
-            // during development to register this render callback.
-        }
-        return g_window != nullptr;
+        return NativeImGuiHost::Register(RenderHotkeyView);
     }
 
     void SetMenuFrameworkRegistry(std::shared_ptr<const Registry> registry, const bool restored)
@@ -3734,46 +3660,39 @@ namespace UHI
 
     bool ToggleMenuFrameworkWindow()
     {
-        if (g_window) {
-            const bool wasOpen = g_window->IsOpen.load() || g_renderWindowVisible.load();
-            if (wasOpen) {
-                g_openingHotkeyCaptureActive = false;
-                g_visibleChangedHotkeyNotice = 0U;
-                CloseEditorModal();
-                SavePendingPreferences();
-            } else {
-                g_automaticRefreshRequestedForCurrentOpen = false;
-                g_focusWindowOnNextRender = true;
-            }
-            g_window->IsOpen = !wasOpen;
-            g_renderWindowVisible = !wasOpen;
-            if (wasOpen) g_focusWindowOnNextRender = false;
-            return true;
+        const bool wasOpen = NativeImGuiHost::IsOpen();
+        if (wasOpen) {
+            g_openingHotkeyCaptureActive = false;
+            g_visibleChangedHotkeyNotice = 0U;
+            CloseEditorModal();
+            SavePendingPreferences();
+        } else {
+            g_automaticRefreshRequestedForCurrentOpen = false;
+            g_focusWindowOnNextRender = true;
         }
-        return false;
+        if (!NativeImGuiHost::Toggle()) return false;
+        g_renderWindowVisible = !wasOpen;
+        if (wasOpen) g_focusWindowOnNextRender = false;
+        return true;
     }
 
     bool CloseMenuFrameworkWindow()
     {
-        if (!g_window || (!g_window->IsOpen.load() && !g_renderWindowVisible.load())) return false;
+        if (!NativeImGuiHost::IsOpen() && !g_renderWindowVisible.load()) return false;
         g_renderWindowVisible = false;
         g_focusWindowOnNextRender = false;
         g_openingHotkeyCaptureActive = false;
         g_visibleChangedHotkeyNotice = 0U;
         CloseEditorModal();
         SavePendingPreferences();
-        g_window->IsOpen = false;
+        NativeImGuiHost::Close();
         g_automaticRefreshRequestedForCurrentOpen = false;
         return true;
     }
 
     bool IsMenuFrameworkWindowOpen() noexcept
     {
-        // Some Menu Framework builds update WindowInterface::IsOpen one frame
-        // after invoking the render callback. The render-visible latch makes
-        // Escape handling authoritative during that frame and is cleared by
-        // every UHM close path.
-        return g_window && (g_window->IsOpen.load() || g_renderWindowVisible.load());
+        return NativeImGuiHost::IsOpen() || g_renderWindowVisible.load();
     }
 
     bool BeginMenuFrameworkOpeningHotkeyCapture() noexcept
@@ -3916,12 +3835,6 @@ namespace UHI
         if (count > 0U) g_pendingChangedHotkeyNotice.store(count);
     }
 
-    void SetMenuFrameworkFontRestartRequired() noexcept
-    {
-        g_pendingBindingWriteNotice.store(
-            static_cast<int>(BindingWriteNotice::fontRestartRequired));
-    }
-
     void SetMenuFrameworkStartScan(std::function<void()> startScan)
     {
         std::scoped_lock lock(g_statusMutex);
@@ -3957,35 +3870,3 @@ namespace UHI
         g_bindingWriter = std::move(writer);
     }
 }
-#else
-namespace UHI
-{
-    bool RegisterMenuFrameworkWindow() { return false; }
-    void SetMenuFrameworkRegistry(std::shared_ptr<const Registry>, bool) {}
-    void SetMenuFrameworkChangedHotkeyNotice(std::size_t) noexcept {}
-    void SetMenuFrameworkFontRestartRequired() noexcept {}
-    void SetMenuFrameworkSexLabInstalled(bool) noexcept {}
-    bool ToggleMenuFrameworkWindow() { return false; }
-    bool CloseMenuFrameworkWindow() { return false; }
-    bool IsMenuFrameworkWindowOpen() noexcept { return false; }
-    bool BeginMenuFrameworkOpeningHotkeyCapture() noexcept { return false; }
-    bool IsMenuFrameworkOpeningHotkeyCaptureActive() noexcept { return false; }
-    bool CaptureMenuFrameworkOpeningHotkey(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) noexcept { return false; }
-    void CancelMenuFrameworkOpeningHotkeyCapture() noexcept {}
-    bool IsMenuFrameworkModalInputActive() noexcept { return false; }
-    bool IsMenuFrameworkEscapeCloseSuppressed() noexcept { return false; }
-    void ReleaseMenuFrameworkEscapeCloseSuppression() noexcept {}
-    bool IsMenuFrameworkBindingCaptureActive() noexcept { return false; }
-    bool CaptureMenuFrameworkBindingInput(std::string_view, std::uint32_t,
-        std::string_view, std::uint32_t) noexcept { return false; }
-    void CancelMenuFrameworkBindingCapture() noexcept {}
-    void CancelMenuFrameworkEditorModal() noexcept {}
-    void SetMenuFrameworkScanStatus(bool, float, float, std::string_view, std::string_view) {}
-    void SetMenuFrameworkStartScan(std::function<void()>) {}
-    void SetMenuFrameworkAutomaticRefresh(std::function<void()>) {}
-    void SetMenuFrameworkCancelScan(std::function<void()>) {}
-    void SetMenuFrameworkOpeningHotkey(
-        std::function<OpeningHotkey()>, std::function<bool(const OpeningHotkey&)>) {}
-    void SetMenuFrameworkBindingWriter(BindingWriter) {}
-}
-#endif

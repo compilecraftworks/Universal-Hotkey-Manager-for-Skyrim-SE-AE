@@ -12,7 +12,5 @@ Universal Hotkey Manager for Skyrim SE-AE 1.0.6 is licensed under GPL-3.0-or-lat
 - Zycore - MIT License - <https://github.com/zyantific/zycore-c>
 - rapidcsv - BSD-3-Clause License - <https://github.com/d99kris/rapidcsv>
 - Dear ImGui - MIT License - <https://github.com/ocornut/imgui>
-- cimgui - MIT License - <https://github.com/cimgui/cimgui>
-- SKSE Menu Framework - MIT License - <https://github.com/Thiago099/SKSE-Menu-Framework>
 
-SKSE Menu Framework is a runtime prerequisite and is not redistributed in the UHM release archive. UHM vendors the framework author's generated single-header client, which calls the framework's embedded ImGui/cimgui exports. SKSE64 and Address Library for SKSE Plugins are also runtime prerequisites and are not redistributed by UHM. The packaged `mouse.png` and `gamepad.png` are original UHM artwork and are released under GPL-3.0-or-later with the rest of the project.
+Dear ImGui and its official Win32/DX11 backends are statically linked into UHM. SKSE64 and Address Library for SKSE Plugins are runtime prerequisites and are not redistributed by UHM. The packaged `mouse.png` and `gamepad.png` are original UHM artwork and are released under GPL-3.0-or-later with the rest of the project.

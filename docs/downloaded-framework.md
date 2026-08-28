@@ -1,11 +1,9 @@
-# Downloaded UI dependencies
+# UI dependency provenance
 
-The legacy 1.x UI SDK is retained under `.deps` only as historical reference:
+UHM consumes the exact Dear ImGui version pinned by `vcpkg.json` and
+`vcpkg-configuration.json`. The verified vcpkg build closure supplies Dear
+ImGui and its official Win32/DX11 backends to the native Skyrim `IMenu` target.
 
-- `.deps/imgui-docking` — official Dear ImGui docking branch
-- `.deps/SKSE-Menu-Framework-SDK-main` — SKSE Menu Framework SDK
-
-UHI no longer links either library. The project vendors the framework author's
-official 2.x/3.x single-header client as `include/SKSEMenuFramework.h`; it
-resolves functions from the installed `SKSEMenuFramework.dll` at runtime.
-Configure the adapter with `-DUHI_ENABLE_MENU_FRAMEWORK=ON`.
+Local historical SDK downloads under ignored `.deps` directories are not
+build inputs, are not packaged, and are not committed. SKSE Menu Framework,
+cimgui, and a standalone `imgui.dll` are not runtime dependencies.

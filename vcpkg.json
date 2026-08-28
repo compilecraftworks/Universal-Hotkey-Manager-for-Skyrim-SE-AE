@@ -4,6 +4,13 @@
   "version-semver": "1.0.6",
   "dependencies": [
     "commonlibsse-ng",
+    {
+      "name": "imgui",
+      "features": [
+        "dx11-binding",
+        "win32-binding"
+      ]
+    },
     "lz4",
     "zydis",
     "zlib"
