@@ -91,8 +91,21 @@ int main(const int argc, char** argv)
         output << "<Config><KeyCustom value=\"F5\"/><Setting name=\"KeyDefine\" value=\"F6\"/>"
                   "<Setting name=\"PrimaryKeyDefine\" value=\"F7\"/></Config>\n";
     }
+    const auto arbitraryDataRoot = root / "Data" / "Vendor" / "Feature";
+    std::filesystem::create_directories(arbitraryDataRoot);
+    {
+        std::ofstream output(arbitraryDataRoot / "keybinds.ini");
+        output << "[Hotkeys]\n"
+                  "iToggleFeature_Key = 65\n"
+                  "iToggleFeature_Mod1 = -1\n"
+                  "iToggleFeature_Mod2 = -1\n"
+                  "iToggleFeature_GPKey = 0\n"
+                  "iToggleFeature_GPMod1 = -1\n"
+                  "iToggleFeature_GPMod2 = -1\n";
+    }
 
-    const auto records = UHI::Scanners::GenericConfigScanner{}.Scan(root);
+    const auto records = UHI::Scanners::GenericConfigScanner{}.Scan(
+        root, true, {}, {}, UHI::NumericCodeSpace::skseUnifiedInputCode);
     const auto mcmFallback = UHI::Scanners::GenericConfigScanner{}.ScanContent(
         root / "MCM" / "Settings" / "Example.ini", "KeyCode=35\n");
     const auto rootFallback = UHI::Scanners::GenericConfigScanner{}.ScanContent(
@@ -144,6 +157,29 @@ int main(const int argc, char** argv)
     const auto defeatConfig = UHI::Scanners::GenericConfigScanner{}.ScanContent(
         root / "SKSE" / "Plugins" / "Defeat" / "DefeatConfig.json",
         "{\"int\":{\"hkoption\":60,\"hkaction\":34,\"hkmodifier\":42}}\n");
+    const auto compoundHotkeys = UHI::Scanners::GenericConfigScanner{}.ScanContent(
+        arbitraryDataRoot / "keybinds.ini",
+        "[Hotkeys]\n"
+        "iToggleFeature_Key = 65\n"
+        "iToggleFeature_Mod1 = -1\n"
+        "iToggleFeature_Mod2 = -1\n"
+        "iToggleFeature_GPKey = 0\n"
+        "iToggleFeature_GPMod1 = -1\n"
+        "iToggleFeature_GPMod2 = -1\n",
+        {}, UHI::NumericCodeSpace::skseUnifiedInputCode);
+    const auto sectionNamedBindings = UHI::Scanners::GenericConfigScanner{}.ScanContent(
+        root / "SKSE" / "Plugins" / "Widgets.ini",
+        "[Keys]\nHideWidgets=13\nShowWidgets=0\n[Main]\nOpacity=75\n",
+        {}, UHI::NumericCodeSpace::skseUnifiedInputCode);
+    const auto nativeMcmControls = UHI::Scanners::GenericConfigScanner{}.ScanContent(
+        root / "SKSE" / "Plugins" / "NativeMcm5.ini",
+        "[Controls]\nNPCEdit=60\nGenitalUp=61\nGenitalDown=62\nRevealing=0\nWhyProblem=63\n"
+        "[General]\nOpacity=75\n",
+        {}, UHI::NumericCodeSpace::skseUnifiedInputCode);
+    const auto generatedRuntimeHotkeys = UHI::Scanners::GenericConfigScanner{}.ScanContent(
+        root / "SKSE" / "Plugins" / "UnrelatedVendor" / "GeneratedRuntimeSettings.ini",
+        "[Settings]\nForwardStageHotkey=57\nPreviousStageHotkey=0\nTakeoverHotkey=0\n",
+        {}, UHI::NumericCodeSpace::skseUnifiedInputCode);
     std::filesystem::remove_all(root);
     const auto has = [&](const std::string_view action, const std::string_view binding) {
         return std::ranges::any_of(records, [&](const auto& record) {
@@ -152,7 +188,7 @@ int main(const int argc, char** argv)
     };
     if (UHI::Scanners::GenericConfigScanner::MayContainBinding("keyboard gamepad controller layout") ||
         !UHI::Scanners::GenericConfigScanner::MayContainBinding("MenuKey=87") ||
-        records.size() != 14 || !has("Open", "F7") || !has("Runtime Mod", "F2") ||
+        records.size() != 15 || !has("Open", "F7") || !has("Runtime Mod", "F2") ||
         !has("Runtime Mod", "F3") || !has("Runtime Mod", "F4") ||
         !has("Custom Names", "F5") || !has("Custom Names", "F6") || !has("Custom Names", "F7") ||
         !has("Runtime Mod", "F10") || !has("Runtime Mod", "NumLk") ||
@@ -191,7 +227,22 @@ int main(const int argc, char** argv)
         mcmKeybinds.size() != 1 || mcmKeybinds[0].owner != "Dynamic Armor Variants" ||
         !std::ranges::any_of(defeatConfig, [](const auto& record) {
             return record.settingName == "hkoption" && record.binding == "F2" && record.editable;
-        })) {
+        }) || compoundHotkeys.size() != 1 || compoundHotkeys[0].binding != "F7" ||
+        compoundHotkeys[0].action != "Toggle Feature" || sectionNamedBindings.size() != 1 ||
+        !std::ranges::any_of(sectionNamedBindings, [](const auto& record) {
+            return record.settingName == "HideWidgets" && record.action == "Hide Widgets" &&
+                record.binding == "=";
+        }) || nativeMcmControls.size() != 4 ||
+        !std::ranges::any_of(nativeMcmControls, [](const auto& record) {
+            return record.settingName == "NPCEdit" && record.action == "NPCEdit" &&
+                record.binding == "F2" && record.editable;
+        }) || !std::ranges::any_of(nativeMcmControls, [](const auto& record) {
+            return record.settingName == "WhyProblem" && record.action == "Why Problem" &&
+                record.binding == "F5" && record.editable;
+        }) || generatedRuntimeHotkeys.size() != 1 ||
+        generatedRuntimeHotkeys[0].settingName != "ForwardStageHotkey" ||
+        generatedRuntimeHotkeys[0].action != "Forward Stage" ||
+        generatedRuntimeHotkeys[0].binding != "Space" || !generatedRuntimeHotkeys[0].editable) {
         std::cerr << "Generic config scanner test failed: count=" << records.size();
         if (!records.empty()) std::cerr << " binding=" << records[0].binding;
         for (const auto& record : records) {
@@ -223,6 +274,10 @@ int main(const int argc, char** argv)
         dump("dkaf", dkaf);
         dump("mcmKeybinds", mcmKeybinds);
         dump("defeatConfig", defeatConfig);
+        dump("compoundHotkeys", compoundHotkeys);
+        dump("sectionNamedBindings", sectionNamedBindings);
+        dump("nativeMcmControls", nativeMcmControls);
+        dump("generatedRuntimeHotkeys", generatedRuntimeHotkeys);
         std::cerr << "\n";
         return 1;
     }

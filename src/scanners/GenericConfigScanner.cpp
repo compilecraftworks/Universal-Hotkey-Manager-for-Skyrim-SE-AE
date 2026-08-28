@@ -13,7 +13,10 @@
 #include <regex>
 #include <atomic>
 #include <mutex>
+#include <optional>
 #include <thread>
+#include <tuple>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace
@@ -278,6 +281,21 @@ namespace
             result = (*iterator)[1].str();
         }
         return result;
+    }
+
+    bool IsBindingSection(const std::string_view section)
+    {
+        auto lowered = Lower(std::string(section));
+        lowered = Trim(std::move(lowered));
+        std::erase_if(lowered, [](const unsigned char character) {
+            return character == '_' || character == '-' || character == '.' || std::isspace(character);
+        });
+        static const std::unordered_set<std::string> sections{
+            "key", "keys", "hotkey", "hotkeys", "keybind", "keybinds",
+            "binding", "bindings", "shortcut", "shortcuts", "input", "inputs",
+            "keyboard", "mouse", "gamepad", "controller", "control", "controls"
+        };
+        return sections.contains(lowered);
     }
 
     bool BareBindingNameHasMeaning(const std::string& key, const std::string_view context,
@@ -589,20 +607,12 @@ namespace
     {
         const auto value = Lower(UHI::PathToUtf8(path.lexically_normal()));
         if (value.find("::") != std::string::npos || IsNonRuntimeResource(path)) return false;
-        // These are the virtual locations from which Skyrim, SKSE plugins,
-        // Papyrus configuration frameworks and interface plugins load live
-        // settings. Arbitrary INIs beside the game executable or in Data's
-        // root are commonly authoring/distribution data and are not enough
-        // evidence of a loaded input binding.
-        return value.find("/skse/plugins/") != std::string::npos ||
-            value.find("/mcm/settings/") != std::string::npos ||
-            value.find("/mcm/config/") != std::string::npos ||
-            value.find("/skse/sexlab/") != std::string::npos ||
-            value.find("/interface/") != std::string::npos ||
-            value.find("/jcuser/") != std::string::npos ||
-            value.find("/netscriptframework/") != std::string::npos ||
-            value.find("/dllplugins/") != std::string::npos ||
-            value.find("/configs/") != std::string::npos;
+        // A number of native plugins deliberately load settings from their
+        // own arbitrary Data subdirectory rather than SKSE/Plugins. The scan
+        // roots already restrict this parser to the active virtual game tree,
+        // so a supported configuration extension plus the resource/default
+        // exclusions above is the generic evidence we need here.
+        return IsConfig(path);
     }
 
     bool IsOrphanedLegacySexLabPPlusSettings(const std::filesystem::path& path)
@@ -691,11 +701,19 @@ namespace
         auto stem = UHI::PathToUtf8(path.stem());
         const auto lowered = Lower(stem);
         static const std::unordered_set<std::string> genericNames{
-            "config", "configuration", "settings", "setting", "preferences", "defaults", "default", "input"
+            "config", "configuration", "settings", "setting", "preferences", "defaults", "default", "input",
+            "inputs", "keybind", "keybinds", "keybinding", "keybindings", "hotkey", "hotkeys", "bindings"
         };
         if (genericNames.contains(lowered) && path.has_parent_path()) {
-            const auto parent = UHI::PathToUtf8(path.parent_path().filename());
-            if (!parent.empty()) return parent;
+            auto parentPath = path.parent_path();
+            while (!parentPath.empty()) {
+                const auto parent = UHI::PathToUtf8(parentPath.filename());
+                const auto parentLower = Lower(parent);
+                if (!parent.empty() && parentLower != "data" && !genericNames.contains(parentLower)) return parent;
+                const auto next = parentPath.parent_path();
+                if (next == parentPath) break;
+                parentPath = next;
+            }
         }
         return stem;
     }
@@ -749,6 +767,14 @@ namespace UHI::Scanners
             if (std::ranges::any_of(indicators, [&](const auto value) {
                     return ContainsAsciiInsensitive(content, value);
                 })) return true;
+            // Some native plugins place ordinary action names under a
+            // dedicated input section, for example `[Keys] HideWidgets=13`.
+            // The section supplies the input semantics even though the member
+            // name itself does not contain Key/Hotkey.
+            static const std::regex bindingSection(
+                R"((?:^|[\r\n])\s*\[(?:keys?|hotkeys?|keybinds?|bindings?|shortcuts?|inputs?|keyboard|mouse|gamepad|controller|controls?)\]\s*(?:[\r\n]|$))",
+                std::regex::icase);
+            if (std::regex_search(content.begin(), content.end(), bindingSection)) return true;
             const auto assignmentIdentifier = [&] {
                 std::size_t position{};
                 while (position < content.size()) {
@@ -787,6 +813,67 @@ namespace UHI::Scanners
         const std::string_view utf8Content, const std::string_view ownerOverride,
         const NumericCodeSpace numericFallback) const
     {
+        struct Assignment
+        {
+            std::string key;
+            std::string raw;
+            std::size_t position{};
+            std::string_view context;
+        };
+        enum class CompoundRole { none, primary, modifier };
+        struct CompoundMember
+        {
+            CompoundRole role{ CompoundRole::none };
+            std::string family;
+            std::string actionKey;
+            std::string device;
+            int order{};
+        };
+
+        const auto compoundMember = [](const std::string& key) {
+            const auto lowered = Lower(key);
+            const auto describe = [&](const std::string_view suffix, const CompoundRole role,
+                                      const std::string_view device, const int order) -> std::optional<CompoundMember> {
+                if (!lowered.ends_with(suffix) || key.size() <= suffix.size()) return std::nullopt;
+                auto actionKey = key.substr(0, key.size() - suffix.size());
+                while (!actionKey.empty() && (actionKey.back() == '_' || actionKey.back() == '-' ||
+                    actionKey.back() == '.')) actionKey.pop_back();
+                if (actionKey.empty()) return std::nullopt;
+                auto family = Lower(actionKey);
+                std::erase_if(family, [](const unsigned char character) { return !std::isalnum(character); });
+                if (family.empty()) return std::nullopt;
+                return CompoundMember{ role, std::move(family), std::move(actionKey), std::string(device), order };
+            };
+            // Longest suffixes come first. These names are common serialized
+            // setting conventions, not mod-specific identifiers.
+            for (const auto& [suffix, role, device, order] : std::array{
+                     std::tuple{ std::string_view("_gamepadmodifier1"), CompoundRole::modifier, std::string_view("gamepad"), 1 },
+                     std::tuple{ std::string_view("_gamepadmodifier2"), CompoundRole::modifier, std::string_view("gamepad"), 2 },
+                     std::tuple{ std::string_view("_gamepadmod1"), CompoundRole::modifier, std::string_view("gamepad"), 1 },
+                     std::tuple{ std::string_view("_gamepadmod2"), CompoundRole::modifier, std::string_view("gamepad"), 2 },
+                     std::tuple{ std::string_view("_gpmodifier1"), CompoundRole::modifier, std::string_view("gamepad"), 1 },
+                     std::tuple{ std::string_view("_gpmodifier2"), CompoundRole::modifier, std::string_view("gamepad"), 2 },
+                     std::tuple{ std::string_view("_gpmod1"), CompoundRole::modifier, std::string_view("gamepad"), 1 },
+                     std::tuple{ std::string_view("_gpmod2"), CompoundRole::modifier, std::string_view("gamepad"), 2 },
+                     std::tuple{ std::string_view("_keyboardmodifier1"), CompoundRole::modifier, std::string_view("keyboard"), 1 },
+                     std::tuple{ std::string_view("_keyboardmodifier2"), CompoundRole::modifier, std::string_view("keyboard"), 2 },
+                     std::tuple{ std::string_view("_modifier1"), CompoundRole::modifier, std::string_view("keyboard"), 1 },
+                     std::tuple{ std::string_view("_modifier2"), CompoundRole::modifier, std::string_view("keyboard"), 2 },
+                     std::tuple{ std::string_view("_mod1"), CompoundRole::modifier, std::string_view("keyboard"), 1 },
+                     std::tuple{ std::string_view("_mod2"), CompoundRole::modifier, std::string_view("keyboard"), 2 },
+                     std::tuple{ std::string_view("_gamepadkey"), CompoundRole::primary, std::string_view("gamepad"), 0 },
+                     std::tuple{ std::string_view("_controllerkey"), CompoundRole::primary, std::string_view("gamepad"), 0 },
+                     std::tuple{ std::string_view("_gpkey"), CompoundRole::primary, std::string_view("gamepad"), 0 },
+                     std::tuple{ std::string_view("_padkey"), CompoundRole::primary, std::string_view("gamepad"), 0 },
+                     std::tuple{ std::string_view("_keyboardkey"), CompoundRole::primary, std::string_view("keyboard"), 0 },
+                     std::tuple{ std::string_view("_kbkey"), CompoundRole::primary, std::string_view("keyboard"), 0 },
+                     std::tuple{ std::string_view("_key"), CompoundRole::primary, std::string_view("keyboard"), 0 }
+                 }) {
+                if (auto member = describe(suffix, role, device, order)) return *member;
+            }
+            return CompoundMember{};
+        };
+
         std::vector<HotkeyRecord> results;
         if (!MayContainBinding(utf8Content)) return results;
         const std::string content(utf8Content);
@@ -798,12 +885,16 @@ namespace UHI::Scanners
         std::unordered_set<std::string> seen;
 
         const auto add = [&](const std::string& key, const std::string& raw, const std::size_t offset,
-                             const std::string_view context) {
+                             const std::string_view context, const std::string_view actionKey = {},
+                             const std::vector<std::string>* compoundModifiers = nullptr,
+                             const NumericCodeSpace structuralCodeSpace = NumericCodeSpace::unknown) {
             if (results.size() >= kMaximumCollectedRecords) return;
-            if (!LooksLikeBinding(key) || IsDisabled(raw) ||
+            const auto bindingSection = IsBindingSection(NearbySection(utf8Content, offset));
+            if ((!LooksLikeBinding(key) && !bindingSection) || IsDisabled(raw) ||
                 !BareBindingNameHasMeaning(key, context, utf8Content, offset)) return;
             auto codeSpace = InferNumericCodeSpace(key);
             bool fallbackUsed = false;
+            if (codeSpace == NumericCodeSpace::unknown) codeSpace = structuralCodeSpace;
             if (codeSpace == NumericCodeSpace::unknown) codeSpace = InferContextCodeSpace(context);
             if (codeSpace == NumericCodeSpace::unknown) {
                 codeSpace = InferPathCodeSpace(source);
@@ -819,8 +910,18 @@ namespace UHI::Scanners
             if (!parsed.conflictEligible) return;
             if (fallbackUsed && parsed.conflictEligible) parsed.codeSystem += " (source-convention fallback)";
             parsed.binding = ApplyModifiers(std::move(parsed.binding), context, source, key);
+            if (compoundModifiers && !compoundModifiers->empty()) {
+                std::string chord;
+                for (const auto& modifier : *compoundModifiers) {
+                    if (modifier.empty()) continue;
+                    if (!chord.empty()) chord += '+';
+                    chord += modifier;
+                }
+                if (!chord.empty()) parsed.binding = chord + '+' + parsed.binding;
+            }
             if (parsed.binding.empty()) return;
-            const auto action = ResolveActionName(key, context, utf8Content, offset, owner);
+            const auto action = ResolveActionName(actionKey.empty() ? key : std::string(actionKey),
+                context, utf8Content, offset, owner);
             const auto activation = InferActivationContext(
                 std::string(context) + " " + key, ContextEvidenceSource::structuredConfiguration);
             const auto line = LineAt(utf8Content, offset);
@@ -852,8 +953,8 @@ namespace UHI::Scanners
         static const std::regex assignment(
             R"UHI((?:"([^"]{1,128})"|'([^']{1,128})'|([A-Za-z0-9_.-]+))\s*[:=]\s*(?:"([^"]*)"|'([^']*)'|([^,\s{}\]#;<>"']+)))UHI",
             std::regex::icase);
+        std::vector<Assignment> assignments;
         for (std::sregex_iterator iterator(content.begin(), content.end(), assignment), end; iterator != end; ++iterator) {
-            if (results.size() >= kMaximumCollectedRecords) break;
             const auto& match = *iterator;
             const auto key = match[1].matched ? match[1].str() : match[2].matched ? match[2].str() : match[3].str();
             const auto raw = match[4].matched ? match[4].str() : match[5].matched ? match[5].str() : match[6].str();
@@ -863,7 +964,68 @@ namespace UHI::Scanners
                     (raw.front() == '{' || raw.front() == '['))) continue;
             const auto contextStart = position > 192 ? position - 192 : 0;
             const auto contextLength = std::min<std::size_t>(512, content.size() - contextStart);
-            add(key, raw, position, std::string_view(content).substr(contextStart, contextLength));
+            assignments.push_back({ key, raw, position,
+                std::string_view(content).substr(contextStart, contextLength) });
+        }
+
+        std::vector<CompoundMember> compoundMembers;
+        compoundMembers.reserve(assignments.size());
+        std::unordered_map<std::string, std::vector<std::size_t>> compoundFamilies;
+        for (std::size_t index = 0; index < assignments.size(); ++index) {
+            compoundMembers.push_back(compoundMember(assignments[index].key));
+            if (compoundMembers.back().role != CompoundRole::none)
+                compoundFamilies[compoundMembers.back().family].push_back(index);
+        }
+        const auto isCompoundFamily = [&](const std::string& family) {
+            const auto found = compoundFamilies.find(family);
+            if (found == compoundFamilies.end()) return false;
+            bool primary = false;
+            bool modifier = false;
+            std::unordered_set<std::string> primaryDevices;
+            for (const auto index : found->second) {
+                const auto& member = compoundMembers[index];
+                primary |= member.role == CompoundRole::primary;
+                modifier |= member.role == CompoundRole::modifier;
+                if (member.role == CompoundRole::primary) primaryDevices.insert(member.device);
+            }
+            return primary && (modifier || primaryDevices.size() > 1U);
+        };
+        for (std::size_t index = 0; index < assignments.size(); ++index) {
+            if (results.size() >= kMaximumCollectedRecords) break;
+            const auto& value = assignments[index];
+            const auto& member = compoundMembers[index];
+            if (member.role == CompoundRole::modifier && isCompoundFamily(member.family)) continue;
+            if (member.role != CompoundRole::primary || !isCompoundFamily(member.family)) {
+                add(value.key, value.raw, value.position, value.context);
+                continue;
+            }
+
+            std::vector<std::pair<int, std::string>> orderedModifiers;
+            for (const auto siblingIndex : compoundFamilies[member.family]) {
+                const auto& siblingMember = compoundMembers[siblingIndex];
+                const auto& sibling = assignments[siblingIndex];
+                if (siblingMember.role != CompoundRole::modifier || siblingMember.device != member.device ||
+                    IsDisabled(sibling.raw)) continue;
+                auto modifierSpace = member.device == "gamepad" ? NumericCodeSpace::skseUnifiedInputCode :
+                    InferNumericCodeSpace(value.key);
+                if (modifierSpace == NumericCodeSpace::unknown) modifierSpace = InferContextCodeSpace(value.context);
+                if (modifierSpace == NumericCodeSpace::unknown) modifierSpace = InferPathCodeSpace(source);
+                if (modifierSpace == NumericCodeSpace::unknown) modifierSpace = numericFallback;
+                const auto modifier = ParseConfigBinding(member.device == "gamepad" ? "GamepadKey" : "ScanCode",
+                    sibling.raw, modifierSpace);
+                if (modifier.conflictEligible && !modifier.binding.empty())
+                    orderedModifiers.emplace_back(siblingMember.order, modifier.binding);
+            }
+            std::ranges::sort(orderedModifiers, {}, &std::pair<int, std::string>::first);
+            std::vector<std::string> modifiers;
+            modifiers.reserve(orderedModifiers.size());
+            for (auto& [order, modifier] : orderedModifiers) modifiers.push_back(std::move(modifier));
+            // A sibling family containing `_Key`/`_Mod*` and `_GPKey`/`_GPMod*`
+            // is itself sufficient evidence for the unified SKSE input number
+            // convention.  This keeps arbitrary nested `keybinds.ini` files
+            // decodable even when the caller cannot supply a path-based hint.
+            add(value.key, value.raw, value.position, value.context, member.actionKey, &modifiers,
+                NumericCodeSpace::skseUnifiedInputCode);
         }
 
         // XML element/attribute forms: <Hotkey value="68"/> and
@@ -954,7 +1116,7 @@ namespace UHI::Scanners
                 }
                 // Bump whenever parsing/detection semantics change so an old
                 // negative result cannot hide a newly supported binding form.
-                const auto tag = "config-v15-hk-prefix-" + fallbackTag;
+                const auto tag = "config-v16-generic-compound-" + fallbackTag;
                 if (cache) {
                     if (auto cached = cache->Find(tag, source)) {
                         perFile[index] = std::move(*cached);

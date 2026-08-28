@@ -144,6 +144,22 @@ namespace
             lowered.starts_with("setkeymapoptionvalue");
     }
 
+    bool IsPlumbingSettingName(const std::string& settingName)
+    {
+        std::string canonical;
+        canonical.reserve(settingName.size());
+        for (const auto character : settingName) {
+            if (std::isalnum(static_cast<unsigned char>(character))) {
+                canonical.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(character))));
+            }
+        }
+        static const std::unordered_set<std::string> plumbingNames{
+            "key", "keycode", "likey", "aikey", "aikeycode", "ainewkey", "newkey",
+            "value", "result", "self", "nonevar"
+        };
+        return plumbingNames.contains(canonical) || canonical.starts_with("temp");
+    }
+
     class Parser
     {
     public:
@@ -188,6 +204,15 @@ namespace
             }
             std::erase_if(records_, [&](const auto& record) {
                 return IsImplementationAction(record.action) && labelledBindings.contains(recordIdentity(record));
+            });
+            // Compiler temporaries and MCM callback parameters are not user
+            // bindings.  They become visible when a script forwards a key
+            // through a helper before the semantic option label is emitted.
+            // Drop only implementation-only records; a real labelled option
+            // with the same spelling remains intact.
+            std::erase_if(records_, [](const auto& record) {
+                return IsImplementationAction(record.action) &&
+                    (record.settingName.empty() || IsPlumbingSettingName(record.settingName));
             });
             std::unordered_set<std::string> implementationBindings;
             std::erase_if(records_, [&](const auto& record) {
@@ -692,19 +717,64 @@ namespace
                             method.contains("getmappedkey") || keyGetter;
                         if (settingGetter) {
                             std::optional<std::string> setting;
+                            std::optional<ValueOrigin> argumentOrigin;
                             for (const auto& argument : variable) {
                                 setting = ResolveString(argument, stringConstants);
                                 if (setting && !setting->empty()) break;
+                                if (!argumentOrigin) argumentOrigin = ResolveOrigin(argument, origins);
                             }
-                            origins[fixed[destinationPosition].index] = {
-                                .settingName = setting.value_or(StringAt(fixed[methodPosition].index)),
-                                .settingSection = StringAt(fixed[methodPosition].index)
-                            };
-                        } else if (opcode == 23 && semanticMethod.starts_with("get") && fixed.size() > 1) {
-                            // GlobalVariable.GetValue[Int] and similar object
-                            // getters retain the identity of their receiver.
-                            if (const auto receiver = ResolveOrigin(fixed[1], origins)) {
-                                origins[fixed[destinationPosition].index] = *receiver;
+                            if (setting && !setting->empty()) {
+                                origins[fixed[destinationPosition].index] = {
+                                    .settingName = *setting,
+                                    .settingSection = StringAt(fixed[methodPosition].index)
+                                };
+                            } else if (argumentOrigin && !argumentOrigin->settingName.empty()) {
+                                // Native helpers frequently receive an integer property/constant
+                                // that identifies the save-backed MCM slot (for example
+                                // GetIntValue(ciSetupNPC)).  Propagate that semantic origin
+                                // through the getter so a later AddKeyMapOption/RegisterForKey
+                                // can be joined to the active value without knowing the mod.
+                                auto origin = *argumentOrigin;
+                                if (origin.settingSection.empty()) {
+                                    origin.settingSection = StringAt(fixed[methodPosition].index);
+                                }
+                                origins[fixed[destinationPosition].index] = std::move(origin);
+                            } else {
+                                origins[fixed[destinationPosition].index] = {
+                                    .settingName = StringAt(fixed[methodPosition].index),
+                                    .settingSection = StringAt(fixed[methodPosition].index)
+                                };
+                            }
+                        } else if (semanticMethod.starts_with("get")) {
+                            // User-defined helpers frequently forward a
+                            // property/global through a method such as
+                            // GetIntGV or GetConfiguredButton.  Preserve the
+                            // first semantic argument without knowing the mod
+                            // or helper name.  The origin only becomes a
+                            // hotkey later when RegisterForKey/AddKeyMapOption
+                            // consumes it, so ordinary getters do not create
+                            // scanner records on their own.
+                            std::optional<ValueOrigin> forwardedOrigin;
+                            for (const auto& argument : variable) {
+                                if (const auto origin = ResolveOrigin(argument, origins);
+                                    origin && !origin->settingName.empty() &&
+                                    !IsPlumbingSettingName(origin->settingName)) {
+                                    forwardedOrigin = *origin;
+                                    break;
+                                }
+                            }
+                            if (forwardedOrigin) {
+                                if (forwardedOrigin->settingSection.empty()) {
+                                    forwardedOrigin->settingSection = StringAt(fixed[methodPosition].index);
+                                }
+                                origins[fixed[destinationPosition].index] = std::move(*forwardedOrigin);
+                            } else if (opcode == 23 && fixed.size() > 1) {
+                                // GlobalVariable.GetValue[Int] and similar
+                                // object getters retain the receiver identity.
+                                if (const auto receiver = ResolveOrigin(fixed[1], origins);
+                                    receiver && !IsPlumbingSettingName(receiver->settingName)) {
+                                    origins[fixed[destinationPosition].index] = *receiver;
+                                }
                             }
                         }
                     }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.6 - 2026-08-28
+
+- Expanded active-VFS configuration discovery to supported settings files anywhere below `Data`, while retaining resource/default exclusions and per-file caching.
+- Added name-independent detection for compound keyboard/gamepad setting families such as `_Key`, `_Mod*`, `_GPKey`, and `_GPMod*`, plus ordinary action names placed under dedicated binding sections.
+- Improved generic PEX data-flow through custom getter helpers so MCM/runtime properties retain their semantic action identity when they reach key-map registration APIs.
+- Kept unresolved static PEX/DLL input candidates hidden and read-only until active runtime evidence confirms them, preventing analyzer internals from appearing as hotkeys.
+- Added anonymous regression fixtures and verified representative FLICK, Stage Flow, furniture-start, widget, and native-MCM layouts without adding mod-name-specific detection rules.
+
 ## 1.0.5 - 2026-08-26
 
 - Fixed the version-dependent ControlMap input-context boundary: Skyrim 1.5.97 now reads its 17-context layout, while Skyrim 1.6.1130 and later use the 18-context layout introduced with Marketplace.

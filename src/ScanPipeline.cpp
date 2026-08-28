@@ -138,14 +138,10 @@ namespace UHI
                 struct ConfigRoot { std::filesystem::path path; bool recursive; NumericCodeSpace fallback; };
                 const std::array roots{
                     ConfigRoot{ gameRoot, false, NumericCodeSpace::windowsVirtualKey },
-                    ConfigRoot{ gameRoot / "Data", false, NumericCodeSpace::skseUnifiedInputCode },
-                    ConfigRoot{ gameRoot / "Data" / "SKSE", true, NumericCodeSpace::skseUnifiedInputCode },
-                    ConfigRoot{ gameRoot / "Data" / "MCM", true, NumericCodeSpace::skseUnifiedInputCode },
-                    ConfigRoot{ gameRoot / "Data" / "Interface", true, NumericCodeSpace::skseUnifiedInputCode },
-                    ConfigRoot{ gameRoot / "Data" / "JCUser", true, NumericCodeSpace::skseUnifiedInputCode },
-                    ConfigRoot{ gameRoot / "Data" / "NetScriptFramework", true, NumericCodeSpace::skseUnifiedInputCode },
-                    ConfigRoot{ gameRoot / "Data" / "DLLPlugins", true, NumericCodeSpace::skseUnifiedInputCode },
-                    ConfigRoot{ gameRoot / "Data" / "configs", true, NumericCodeSpace::skseUnifiedInputCode },
+                    // Native plugins are free to load live settings from any
+                    // subdirectory below Data. Scan the active VFS tree once
+                    // instead of maintaining a lossy list of known layouts.
+                    ConfigRoot{ gameRoot / "Data", true, NumericCodeSpace::skseUnifiedInputCode },
                     ConfigRoot{ gameRoot / "SKSE", true, NumericCodeSpace::skseUnifiedInputCode },
                     ConfigRoot{ gameRoot / "MCM", true, NumericCodeSpace::skseUnifiedInputCode },
                     ConfigRoot{ gameRoot / "configs", true, NumericCodeSpace::skseUnifiedInputCode }

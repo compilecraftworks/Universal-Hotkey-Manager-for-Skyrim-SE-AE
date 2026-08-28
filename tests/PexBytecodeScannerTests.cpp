@@ -41,11 +41,13 @@ namespace
     {
         enum StringIndex : std::uint16_t {
             empty, object, parent, onConfigInit, noneType, registerForKey, self, noneVar, intType,
-            addKeyMapOption, hotkeyLabel, keyVariable, hotkeyProperty, temporary
+            addKeyMapOption, hotkeyLabel, keyVariable, hotkeyProperty, temporary,
+            getIntGV, startLabel, startVariable, startProperty, temporary1, temporary2
         };
         constexpr std::array strings{
             "", "TestMcmScript", "Quest", "OnConfigInit", "None", "RegisterForKey", "self",
-            "::nonevar", "Int", "AddKeyMapOption", "$UHI_TEST_HOTKEY", "::Hotkey_var", "Hotkey", "::temp0"
+            "::nonevar", "Int", "AddKeyMapOption", "$UHI_TEST_HOTKEY", "::Hotkey_var", "Hotkey", "::temp0",
+            "GetIntGV", "Start Hotkey", "::StartHotkey_var", "StartHotkey", "::temp1", "::temp2"
         };
         std::vector<char> data;
         for (const auto byte : std::array<std::uint8_t, 4>{ 0xFA, 0x57, 0xC0, 0xDE }) U8(data, byte);
@@ -58,22 +60,33 @@ namespace
         U16(data, 1); // objects
         U16(data, object); U32(data, 0); U16(data, parent); U16(data, empty); U32(data, 0); U16(data, empty);
 
-        U16(data, 1); // variables
+        U16(data, 2); // variables
         U16(data, keyVariable); U16(data, intType); U32(data, 0); Integer(data, 68);
-        U16(data, 1); // properties
+        U16(data, startVariable); U16(data, intType); U32(data, 0); Integer(data, 0);
+        U16(data, 2); // properties
         U16(data, hotkeyProperty); U16(data, intType); U16(data, empty); U32(data, 0); U8(data, 4);
         U16(data, keyVariable);
+        U16(data, startProperty); U16(data, intType); U16(data, empty); U32(data, 0); U8(data, 4);
+        U16(data, startVariable);
         U16(data, 1); // states
         U16(data, empty); U16(data, 1); // state and functions
         U16(data, onConfigInit);
         U16(data, noneType); U16(data, empty); U32(data, 0); U8(data, 0); // function header
-        U16(data, 0); U16(data, 1); U16(data, temporary); U16(data, intType); // params, locals
-        U16(data, 4); // instructions
+        U16(data, 0); U16(data, 3); // params, locals
+        U16(data, temporary); U16(data, intType);
+        U16(data, temporary1); U16(data, intType);
+        U16(data, temporary2); U16(data, intType);
+        U16(data, 7); // instructions
         U8(data, 28); Identifier(data, hotkeyProperty); Identifier(data, self); Identifier(data, temporary);
         U8(data, 23); Identifier(data, registerForKey); Identifier(data, self); Identifier(data, noneVar);
         Integer(data, 1); Identifier(data, temporary);
         U8(data, 23); Identifier(data, addKeyMapOption); Identifier(data, self); Identifier(data, noneVar);
         Integer(data, 2); StringValue(data, hotkeyLabel); Identifier(data, temporary);
+        U8(data, 28); Identifier(data, startProperty); Identifier(data, self); Identifier(data, temporary1);
+        U8(data, 23); Identifier(data, getIntGV); Identifier(data, self); Identifier(data, temporary2);
+        Integer(data, 2); Identifier(data, temporary1); Integer(data, 0);
+        U8(data, 23); Identifier(data, addKeyMapOption); Identifier(data, self); Identifier(data, noneVar);
+        Integer(data, 2); StringValue(data, startLabel); Identifier(data, temporary2);
         U8(data, 26); None(data);
         return data;
     }
@@ -102,6 +115,10 @@ int main(const int argc, char** argv)
         return record.action == "$UHI_TEST_HOTKEY" && record.binding == "F10" &&
             record.detector == "PexBytecodeScanner" && record.settingName == "Hotkey";
     });
+    const auto customGetter = std::ranges::find_if(records, [](const auto& record) {
+        return record.action == "Start Hotkey" && record.settingName == "StartHotkey" &&
+            record.codeSystem.find("runtime value unresolved") != std::string::npos;
+    });
     auto corrupt = bytes;
     corrupt.resize(corrupt.size() - 3);
     const auto rejected = UHI::Scanners::PexBytecodeScanner{}.ScanContent(
@@ -109,7 +126,7 @@ int main(const int argc, char** argv)
     // RegisterForKey and AddKeyMapOption refer to the same MCM setting in this
     // fixture. The implementation call must be consolidated into the labelled
     // entry instead of creating a false conflict with itself.
-    if (records.size() != 1 || mcm == records.end() || !rejected.empty()) {
+    if (records.size() != 2 || mcm == records.end() || customGetter == records.end() || !rejected.empty()) {
         std::cerr << "PEX bytecode scanner test failed\n";
         return 1;
     }
