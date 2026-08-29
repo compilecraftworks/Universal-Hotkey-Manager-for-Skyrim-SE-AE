@@ -54,6 +54,50 @@ namespace
     bool g_rendererInitialized{};
     std::string g_imguiIniPath;
     HWND g_outputWindow{};
+    WNDPROC g_previousWindowProc{};
+
+    LRESULT CALLBACK UhmWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        // Skyrim's Scaleform route does not consistently forward wheel events
+        // to a native IMenu.  Receive the actual Windows message as the
+        // authoritative fallback, so ImGui tables always scroll under the
+        // pointer.  We consume it only while UHM owns the open menu.
+        if (message == WM_MOUSEWHEEL && g_open.load() && g_rendererInitialized && g_imguiContext) {
+            const auto delta = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wParam)) /
+                static_cast<float>(WHEEL_DELTA);
+            if (delta != 0.0F) {
+                UHI::NativeImGuiHost::SubmitMouseWheel(delta);
+                return 0;
+            }
+        }
+        return g_previousWindowProc ?
+            CallWindowProc(g_previousWindowProc, window, message, wParam, lParam) :
+            DefWindowProc(window, message, wParam, lParam);
+    }
+
+    bool InstallWindowMessageHook(HWND window)
+    {
+        if (!window || g_previousWindowProc) return g_previousWindowProc != nullptr;
+        SetLastError(0);
+        const auto previous = SetWindowLongPtr(window, GWLP_WNDPROC,
+            reinterpret_cast<LONG_PTR>(&UhmWindowProc));
+        if (previous == 0 && GetLastError() != 0) {
+            SKSE::log::warn("UHM could not install the native mouse-wheel message hook");
+            return false;
+        }
+        g_previousWindowProc = reinterpret_cast<WNDPROC>(previous);
+        return true;
+    }
+
+    void RemoveWindowMessageHook()
+    {
+        if (!g_outputWindow || !g_previousWindowProc) return;
+        if (reinterpret_cast<WNDPROC>(GetWindowLongPtr(g_outputWindow, GWLP_WNDPROC)) == &UhmWindowProc) {
+            SetWindowLongPtr(g_outputWindow, GWLP_WNDPROC,
+                reinterpret_cast<LONG_PTR>(g_previousWindowProc));
+        }
+        g_previousWindowProc = nullptr;
+    }
 
     struct KeyMapping
     {
@@ -310,6 +354,7 @@ namespace
 
     void ResetRendererInitialization()
     {
+        RemoveWindowMessageHook();
         auto* previous = ImGui::GetCurrentContext();
         if (g_imguiContext) ImGui::SetCurrentContext(g_imguiContext);
 
@@ -400,6 +445,9 @@ namespace
             return false;
         }
         g_rendererInitialized = true;
+        if (!InstallWindowMessageHook(description.OutputWindow)) {
+            SKSE::log::warn("UHM will use the Skyrim input fallback for mouse-wheel scrolling");
+        }
         ImGui::SetCurrentContext(previousContext);
         SKSE::log::info("UHM native Dear ImGui Win32/DX11 host initialized");
         return true;

@@ -2210,11 +2210,14 @@ namespace
 
                 const bool windowOpen = UHI::IsMenuFrameworkWindowOpen();
                 if (windowOpen && button->device == RE::INPUT_DEVICE::kMouse &&
-                    button->IsDown() && (button->idCode == 8U || button->idCode == 9U)) {
+                    button->IsPressed() && !button->IsRepeating() &&
+                    (button->idCode == 8U || button->idCode == 9U)) {
                     // Directly opened native menus do not receive a reliable
                     // Scaleform wheel event on every input stack. Forward the
                     // physical wheel buttons to ImGui and consume them so the
-                    // list under the cursor scrolls consistently.
+                    // list under the cursor scrolls consistently. Wheel
+                    // events are transient presses; unlike regular buttons,
+                    // some input stacks do not report them as IsDown().
                     UHI::NativeImGuiHost::SubmitMouseWheel(button->idCode == 8U ? 1.0F : -1.0F);
                     return RE::BSEventNotifyControl::kStop;
                 }

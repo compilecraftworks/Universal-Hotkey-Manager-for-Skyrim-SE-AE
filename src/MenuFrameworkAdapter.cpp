@@ -149,6 +149,7 @@ namespace
     bool g_openBindingPopup{};
     std::atomic_bool g_pendingRestoredScanNotice{ false };
     bool g_visibleRestoredScanNotice{};
+    std::int64_t g_restoredScanNoticeOpenedAtMs{};
     std::atomic_size_t g_pendingChangedHotkeyNotice{};
     std::size_t g_visibleChangedHotkeyNotice{};
     enum class BindingWriteNotice : int
@@ -2882,6 +2883,7 @@ namespace
             g_renderWindowVisible = false;
             g_openingHotkeyCaptureActive = false;
             g_visibleRestoredScanNotice = false;
+            g_restoredScanNoticeOpenedAtMs = 0;
             g_visibleChangedHotkeyNotice = 0U;
             SavePendingPreferences();
             UHI::NativeImGuiHost::Close();
@@ -2893,6 +2895,10 @@ namespace
         // instead of consuming permanent vertical space in the overview.
         if (g_pendingRestoredScanNotice.exchange(false)) {
             g_visibleRestoredScanNotice = true;
+            // Start the timeout only after the popup is actually rendered.
+            // This prevents another open editor popup from consuming the
+            // restored-cache notice's visible lifetime.
+            g_restoredScanNoticeOpenedAtMs = 0;
         }
         const char* restoredPopupTitle = UiText(
             "Previous scan restored##UHM_RESTORED_SCAN_NOTICE",
@@ -2902,13 +2908,23 @@ namespace
             ImGui::OpenPopup(restoredPopupTitle);
         }
         bool restoredNoticeOpen = true;
-        ImGui::SetNextWindowSize(ImVec2(720.0F * g_uiScale, 250.0F * g_uiScale), ImGuiCond_Appearing);
+        ImGui::SetNextWindowSize(ImVec2(840.0F * g_uiScale, 290.0F * g_uiScale), ImGuiCond_Appearing);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
             ImVec2(34.0F * g_uiScale, 28.0F * g_uiScale));
+        ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1.25F * g_uiScale);
         ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+        // The notice is informational, so its outline must stay neutral and
+        // must not inherit the selected category's accent color.
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.52F, 0.52F, 0.52F, 0.58F));
         if (ImGui::BeginPopupModal(restoredPopupTitle, &restoredNoticeOpen, 0)) {
             g_modalInputActive = true;
             const bool dismissNotice = ConsumePopupCancelRequest();
+            if (g_restoredScanNoticeOpenedAtMs == 0) {
+                g_restoredScanNoticeOpenedAtMs = MonotonicMilliseconds();
+            }
+            constexpr std::int64_t kRestoredNoticeLifetimeMs = 5000;
+            const bool timedOut =
+                MonotonicMilliseconds() - g_restoredScanNoticeOpenedAtMs >= kRestoredNoticeLifetimeMs;
             ImGui::Dummy(ImVec2(0.0F, 18.0F * g_uiScale));
             RenderCenteredTextLine(UiText(
                 "Previous scan results were restored.",
@@ -2924,17 +2940,20 @@ namespace
             const ImVec2 restoredAvailable = ImGui::GetContentRegionAvail();
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                 (std::max)(0.0F, (restoredAvailable.x - okaySize.x) * 0.5F));
-            if (dismissNotice || ImGui::Button(okay, okaySize)) {
+            const bool okayClicked = ImGui::Button(okay, okaySize);
+            if (dismissNotice || timedOut || okayClicked) {
                 g_visibleRestoredScanNotice = false;
+                g_restoredScanNoticeOpenedAtMs = 0;
                 g_modalInputActive = false;
                 ImGui::CloseCurrentPopup();
             }
             ImGui::EndPopup();
         }
-        ImGui::PopStyleColor();
-        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(2);
+        ImGui::PopStyleVar(2);
         if (!restoredNoticeOpen) {
             g_visibleRestoredScanNotice = false;
+            g_restoredScanNoticeOpenedAtMs = 0;
             g_modalInputActive = false;
         }
 
@@ -3151,17 +3170,6 @@ namespace
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
-
-            // Keep the navigation rule independent from the darker separators
-            // used inside the Options page.  This makes the category boundary
-            // consistently visible without changing the category tab colors.
-            const ImVec2 tabRuleStart = ImGui::GetCursorScreenPos();
-            const float tabRuleWidth = (std::max)(0.0F, ImGui::GetContentRegionAvail().x);
-            ImGui::GetWindowDrawList()->AddLine(
-                tabRuleStart,
-                ImVec2(tabRuleStart.x + tabRuleWidth, tabRuleStart.y),
-                ImGui::GetColorU32(ImVec4(0.94F, 0.95F, 0.97F, 0.72F)),
-                (std::max)(1.0F, layoutScale));
         }
         ImGui::SetWindowFontScale(g_uiScale);
         ImGui::Spacing();
@@ -3442,8 +3450,8 @@ namespace
                         "调整整体文字大小和界面窗口透明度，并自动或手动选择界面语言。"),
                     appearanceGroupHeight);
                 float textSizePercent = g_uiScale * 100.0F;
-                const char* textSizeLabel = UiText("Text size (range 80% to 135%)",
-                    "글자 크기 (범위 80%~135%)", "文字大小（范围 80% 至 135%）");
+                const char* textSizeLabel = UiText("Text size",
+                    "글자 크기", "文字大小");
                 const float resetWidth = ScaledButtonSize(UiText("Reset", "초기화", "重置"), 92.0F, 34.0F).x;
                 const ImVec2 appearanceAvailable = ImGui::GetContentRegionAvail();
                 const float textSizeLabelWidth = (std::max)(260.0F * g_uiScale,
@@ -3489,8 +3497,8 @@ namespace
                     g_preferencesDirty = true;
                 }
                 float opacityPercent = g_windowOpacity * 100.0F;
-                const char* opacityLabel = UiText("UI window opacity (range 35% to 100%)",
-                    "UI 창 투명도 (범위 35%~100%)", "界面窗口不透明度（范围 35% 至 100%）");
+                const char* opacityLabel = UiText("UI window opacity",
+                    "UI 창 투명도", "界面窗口不透明度");
                 ImGui::AlignTextToFramePadding();
                 ImGui::TextUnformatted(opacityLabel);
                 ImGui::SameLine(textSizeLabelWidth);
