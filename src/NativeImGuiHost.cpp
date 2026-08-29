@@ -1,7 +1,10 @@
 #include "UHI/NativeImGuiHost.h"
+#include "UHI/SkyrimRuntimeLayout.h"
 
 #include <RE/R/Renderer.h>
+#include <REL/Relocation.h>
 #include <SKSE/Logger.h>
+#include <SKSE/SKSE.h>
 
 #include <d3d11.h>
 #include <dxgi.h>
@@ -39,10 +42,15 @@ namespace
 
     UHI::NativeImGuiHost::RenderCallback g_renderCallback{};
     std::atomic_bool g_registered{};
+    std::atomic_bool g_rendererHookInstalled{};
     std::atomic_bool g_open{};
     std::atomic_bool g_requestedOpen{};
     std::atomic_bool g_cursorOwnedByHost{};
+    std::atomic_int g_pendingMouseWheelSteps{};
     std::mutex g_rendererMutex;
+    ImGuiContext* g_imguiContext{};
+    bool g_win32Initialized{};
+    bool g_dx11Initialized{};
     bool g_rendererInitialized{};
     std::string g_imguiIniPath;
     HWND g_outputWindow{};
@@ -114,17 +122,24 @@ namespace
         ImFontConfig config{};
         config.MergeMode = true;
         config.PixelSnapH = true;
-        config.OversampleH = 2;
-        config.OversampleV = 2;
+        // Match the proven SFS font-atlas settings. CJK glyphs are already
+        // rendered at a large base size, so extra oversampling only inflates
+        // the GPU texture without improving the in-game result materially.
+        config.OversampleH = 1;
+        config.OversampleV = 1;
         io.Fonts->AddFontFromFileTTF(path, 32.0F, &config, ranges);
     }
 
-    void BuildFontAtlas(ImGuiIO& io)
+    bool BuildFontAtlas(ImGuiIO& io)
     {
         io.Fonts->Clear();
+        // Keep a wide atlas so the combined English/Korean/Chinese glyph set
+        // grows horizontally instead of exceeding D3D11's texture height.
+        io.Fonts->TexDesiredWidth = 4096;
         ImFontConfig baseConfig{};
-        baseConfig.OversampleH = 2;
-        baseConfig.OversampleV = 2;
+        baseConfig.OversampleH = 1;
+        baseConfig.OversampleV = 1;
+        baseConfig.PixelSnapH = true;
         constexpr auto* basePath = "C:\\Windows\\Fonts\\segoeui.ttf";
         if (std::filesystem::exists(std::filesystem::path(basePath))) {
             io.FontDefault = io.Fonts->AddFontFromFileTTF(
@@ -135,8 +150,64 @@ namespace
         }
 
         AddMergedFont(io, "C:\\Windows\\Fonts\\malgun.ttf", io.Fonts->GetGlyphRangesKorean());
-        AddMergedFont(io, "C:\\Windows\\Fonts\\msyh.ttc", io.Fonts->GetGlyphRangesChineseFull());
-        AddMergedFont(io, "C:\\Windows\\Fonts\\YuGothR.ttc", io.Fonts->GetGlyphRangesJapanese());
+        AddMergedFont(io, "C:\\Windows\\Fonts\\msyh.ttc", io.Fonts->GetGlyphRangesChineseSimplifiedCommon());
+
+        if (!io.Fonts->Build()) {
+            SKSE::log::error("Could not build the UHM English/Korean/Chinese font atlas");
+            return false;
+        }
+
+        constexpr auto maxTextureDimension = static_cast<int>(D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION);
+        if (io.Fonts->TexWidth <= 0 || io.Fonts->TexHeight <= 0 ||
+            io.Fonts->TexWidth > maxTextureDimension || io.Fonts->TexHeight > maxTextureDimension) {
+            SKSE::log::error(
+                "UHM font atlas is not valid for D3D11: {}x{} (maximum {}x{})",
+                io.Fonts->TexWidth, io.Fonts->TexHeight, maxTextureDimension, maxTextureDimension);
+            return false;
+        }
+
+        SKSE::log::info("Built UHM English/Korean/Chinese font atlas: {}x{}",
+            io.Fonts->TexWidth, io.Fonts->TexHeight);
+        return true;
+    }
+
+    bool ValidateFontTexture(ID3D11Device* device, ImGuiIO& io)
+    {
+        if (!device || !io.Fonts || !io.Fonts->IsBuilt()) return false;
+
+        unsigned char* pixels{};
+        int width{};
+        int height{};
+        io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+        if (!pixels || width <= 0 || height <= 0) {
+            SKSE::log::error("Could not obtain the UHM font-atlas pixels");
+            return false;
+        }
+
+        D3D11_TEXTURE2D_DESC description{};
+        description.Width = static_cast<UINT>(width);
+        description.Height = static_cast<UINT>(height);
+        description.MipLevels = 1;
+        description.ArraySize = 1;
+        description.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        description.SampleDesc.Count = 1;
+        description.Usage = D3D11_USAGE_DEFAULT;
+        description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+        D3D11_SUBRESOURCE_DATA data{};
+        data.pSysMem = pixels;
+        data.SysMemPitch = description.Width * 4U;
+
+        ID3D11Texture2D* texture{};
+        const auto result = device->CreateTexture2D(&description, &data, &texture);
+        if (texture) texture->Release();
+        if (FAILED(result)) {
+            SKSE::log::error(
+                "D3D11 rejected the UHM font texture {}x{} (HRESULT 0x{:08X}); native UI remains disabled",
+                width, height, static_cast<std::uint32_t>(result));
+            return false;
+        }
+        return true;
     }
 
     ImVec4 HexColor(const std::uint32_t rgba)
@@ -170,12 +241,17 @@ namespace
         colors[ImGuiCol_TextDisabled] = HexColor(0xFFFFFF33U);
         colors[ImGuiCol_WindowBg] = HexColor(0x00000099U);
         colors[ImGuiCol_ChildBg] = HexColor(0x00000000U);
-        colors[ImGuiCol_PopupBg] = HexColor(0x00000099U);
-        colors[ImGuiCol_Border] = HexColor(0xFFFFFF66U);
-        colors[ImGuiCol_BorderShadow] = HexColor(0xFFFFFF33U);
-        colors[ImGuiCol_FrameBg] = HexColor(0x00000000U);
-        colors[ImGuiCol_FrameBgHovered] = HexColor(0xFFFFFF33U);
-        colors[ImGuiCol_FrameBgActive] = HexColor(0xFFFFFF66U);
+        // Editor and notification popups must remain fully opaque even when
+        // the user lowers the transparency of the main manager window.
+        colors[ImGuiCol_PopupBg] = HexColor(0x000000FFU);
+        // Keep controls distinct from the window without making them look
+        // boxed-in.  A near-black blue-grey fill and a low-contrast border
+        // remain readable over both the game world and opaque popups.
+        colors[ImGuiCol_Border] = HexColor(0x52606F73U);
+        colors[ImGuiCol_BorderShadow] = HexColor(0x00000000U);
+        colors[ImGuiCol_FrameBg] = HexColor(0x080B10EBU);
+        colors[ImGuiCol_FrameBgHovered] = HexColor(0x101722F2U);
+        colors[ImGuiCol_FrameBgActive] = HexColor(0x172536FAU);
         colors[ImGuiCol_TitleBg] = HexColor(0x000000FFU);
         colors[ImGuiCol_TitleBgActive] = HexColor(0x000000FFU);
         colors[ImGuiCol_TitleBgCollapsed] = HexColor(0x000000FFU);
@@ -185,11 +261,11 @@ namespace
         colors[ImGuiCol_ScrollbarGrabHovered] = HexColor(0xFFFFFF33U);
         colors[ImGuiCol_ScrollbarGrabActive] = HexColor(0xFFFFFF66U);
         colors[ImGuiCol_CheckMark] = HexColor(0xFFFFFFFFU);
-        colors[ImGuiCol_SliderGrab] = HexColor(0xFFFFFF33U);
-        colors[ImGuiCol_SliderGrabActive] = HexColor(0xFFFFFF33U);
-        colors[ImGuiCol_Button] = HexColor(0x00000000U);
-        colors[ImGuiCol_ButtonHovered] = HexColor(0xFFFFFF33U);
-        colors[ImGuiCol_ButtonActive] = HexColor(0xFFFFFF66U);
+        colors[ImGuiCol_SliderGrab] = HexColor(0x526779C2U);
+        colors[ImGuiCol_SliderGrabActive] = HexColor(0x6D8CA8E6U);
+        colors[ImGuiCol_Button] = HexColor(0x222426F0U);
+        colors[ImGuiCol_ButtonHovered] = HexColor(0x303338F7U);
+        colors[ImGuiCol_ButtonActive] = HexColor(0x404247FFU);
         colors[ImGuiCol_Header] = HexColor(0xFFFFFF1AU);
         colors[ImGuiCol_HeaderHovered] = HexColor(0xFFFFFF33U);
         colors[ImGuiCol_HeaderActive] = HexColor(0xFFFFFF66U);
@@ -211,25 +287,61 @@ namespace
         colors[ImGuiCol_ModalWindowDimBg] = HexColor(0x00000000U);
     }
 
-    bool EnsureRenderer()
+    class ScopedImGuiContext final
+    {
+    public:
+        explicit ScopedImGuiContext(ImGuiContext* context) noexcept :
+            previous_(ImGui::GetCurrentContext())
+        {
+            ImGui::SetCurrentContext(context);
+        }
+
+        ~ScopedImGuiContext()
+        {
+            ImGui::SetCurrentContext(previous_);
+        }
+
+        ScopedImGuiContext(const ScopedImGuiContext&) = delete;
+        ScopedImGuiContext& operator=(const ScopedImGuiContext&) = delete;
+
+    private:
+        ImGuiContext* previous_{};
+    };
+
+    void ResetRendererInitialization()
+    {
+        auto* previous = ImGui::GetCurrentContext();
+        if (g_imguiContext) ImGui::SetCurrentContext(g_imguiContext);
+
+        if (g_dx11Initialized) {
+            ImGui_ImplDX11_Shutdown();
+            g_dx11Initialized = false;
+        }
+        if (g_win32Initialized) {
+            ImGui_ImplWin32_Shutdown();
+            g_win32Initialized = false;
+        }
+        if (g_imguiContext) {
+            auto* destroyed = g_imguiContext;
+            ImGui::DestroyContext(g_imguiContext);
+            g_imguiContext = nullptr;
+            if (previous == destroyed) previous = nullptr;
+        }
+
+        ImGui::SetCurrentContext(previous);
+        g_rendererInitialized = false;
+        g_outputWindow = nullptr;
+    }
+
+    bool InitializeRenderer(IDXGISwapChain* swapChain, ID3D11Device* device,
+        ID3D11DeviceContext* context)
     {
         std::scoped_lock lock(g_rendererMutex);
         if (g_rendererInitialized) return true;
-
-        auto* renderer = RE::BSGraphics::Renderer::GetSingleton();
-        if (!renderer) {
-            SKSE::log::error("Could not initialize UHM ImGui: Skyrim renderer is unavailable");
+        if (!swapChain || !device || !context) {
+            SKSE::log::error("Could not initialize UHM ImGui: incomplete Skyrim DirectX 11 state");
             return false;
         }
-        const auto& runtime = renderer->GetRuntimeData();
-        if (!runtime.renderWindows || !runtime.renderWindows->swapChain || !runtime.forwarder || !runtime.context) {
-            SKSE::log::error("Could not initialize UHM ImGui: incomplete DirectX 11 runtime data");
-            return false;
-        }
-
-        auto* swapChain = reinterpret_cast<IDXGISwapChain*>(runtime.renderWindows->swapChain);
-        auto* device = reinterpret_cast<ID3D11Device*>(runtime.forwarder);
-        auto* context = reinterpret_cast<ID3D11DeviceContext*>(runtime.context);
         DXGI_SWAP_CHAIN_DESC description{};
         if (FAILED(swapChain->GetDesc(&description)) || !description.OutputWindow) {
             SKSE::log::error("Could not initialize UHM ImGui: swap-chain window is unavailable");
@@ -237,7 +349,17 @@ namespace
         }
 
         IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
+        auto* previousContext = ImGui::GetCurrentContext();
+        g_imguiContext = ImGui::CreateContext();
+        if (!g_imguiContext) {
+            SKSE::log::error("Could not initialize UHM ImGui: context creation failed");
+            ImGui::SetCurrentContext(previousContext);
+            return false;
+        }
+        // ImGui::CreateContext restores an already-active foreign context.
+        // UHM owns a separate context, so every setup call must explicitly
+        // target it before the Win32/DX11 backends attach their user data.
+        ImGui::SetCurrentContext(g_imguiContext);
         ApplyLegacyStyle();
         auto& io = ImGui::GetIO();
         g_imguiIniPath = (std::filesystem::current_path() /
@@ -246,15 +368,39 @@ namespace
         io.LogFilename = nullptr;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
         io.ConfigWindowsMoveFromTitleBarOnly = true;
-        BuildFontAtlas(io);
+        if (!BuildFontAtlas(io)) {
+            ResetRendererInitialization();
+            ImGui::SetCurrentContext(previousContext);
+            return false;
+        }
+        // The stock ImGui DX11 backend assumes CreateTexture2D succeeds and
+        // dereferences the returned pointer in release builds. Validate the
+        // exact atlas descriptor and pixels before attaching the backend so a
+        // driver rejection fails closed instead of crashing on the first menu
+        // frame.
+        if (!ValidateFontTexture(device, io)) {
+            ResetRendererInitialization();
+            ImGui::SetCurrentContext(previousContext);
+            return false;
+        }
         g_outputWindow = description.OutputWindow;
 
-        if (!ImGui_ImplWin32_Init(description.OutputWindow) || !ImGui_ImplDX11_Init(device, context)) {
+        g_win32Initialized = ImGui_ImplWin32_Init(description.OutputWindow);
+        g_dx11Initialized = g_win32Initialized && ImGui_ImplDX11_Init(device, context);
+
+        // ImGui_ImplDX11_Init owns device-object creation. Calling
+        // ImGui_ImplDX11_CreateDeviceObjects here before Skyrim has completed its
+        // D3D initialization caused the first hotkey press to create an invisible
+        // pausing menu and the second press to dereference a partial backend.
+        if (!g_win32Initialized || !g_dx11Initialized ||
+            !io.BackendPlatformUserData || !io.BackendRendererUserData) {
             SKSE::log::error("Could not initialize UHM ImGui Win32/DX11 backends");
-            ImGui::DestroyContext();
+            ResetRendererInitialization();
+            ImGui::SetCurrentContext(previousContext);
             return false;
         }
         g_rendererInitialized = true;
+        ImGui::SetCurrentContext(previousContext);
         SKSE::log::info("UHM native Dear ImGui Win32/DX11 host initialized");
         return true;
     }
@@ -279,7 +425,8 @@ namespace
 
     void ProcessScaleformEvent(const RE::BSUIScaleformData* data)
     {
-        if (!data || !data->scaleformEvent || !ImGui::GetCurrentContext()) return;
+        if (!data || !data->scaleformEvent || !g_rendererInitialized || !g_imguiContext) return;
+        const ScopedImGuiContext context(g_imguiContext);
         const auto* event = data->scaleformEvent;
         auto& io = ImGui::GetIO();
         switch (event->type.get()) {
@@ -321,10 +468,15 @@ namespace
     public:
         void PostDisplay() override
         {
-            if (!EnsureRenderer()) return;
+            if (!g_rendererInitialized || !g_win32Initialized || !g_dx11Initialized || !g_imguiContext) return;
+            const ScopedImGuiContext context(g_imguiContext);
             ImGui_ImplWin32_NewFrame();
             ImGui_ImplDX11_NewFrame();
             UpdateMousePosition();
+            const auto wheelSteps = g_pendingMouseWheelSteps.exchange(0, std::memory_order_relaxed);
+            if (wheelSteps != 0) {
+                ImGui::GetIO().AddMouseWheelEvent(0.0F, static_cast<float>(wheelSteps));
+            }
             ImGui::NewFrame();
             if (g_renderCallback) g_renderCallback();
             ImGui::Render();
@@ -357,12 +509,11 @@ namespace
         {
             using Flags = RE::UI_MENU_FLAGS;
             auto* menu = new NativeMenu();
-            // UHM always owns the cursor while visible, including when a gamepad is
-            // connected. kUpdateUsesCursor would clear kUsesCursor in that case.
-            menu->menuFlags.set(Flags::kUsesCursor, Flags::kDontHideCursorWhenTopmost,
-                Flags::kCustomRendering, Flags::kUsesMenuContext, Flags::kPausesGame,
-                Flags::kModal, Flags::kDisablePauseMenu, Flags::kTopmostRenderedMenu,
-                Flags::kRequiresUpdate);
+            // Match the proven native ImGui IMenu lifecycle used by SFS. Extra
+            // modal/topmost flags are intentionally omitted because they alter
+            // Skyrim's cursor and pause-menu ownership during transitions.
+            menu->menuFlags.set(Flags::kUpdateUsesCursor, Flags::kUsesCursor,
+                Flags::kCustomRendering, Flags::kUsesMenuContext, Flags::kPausesGame);
             menu->depthPriority = 11;
             menu->inputContext.set(Context::kMenuMode);
             return menu;
@@ -396,6 +547,43 @@ namespace
         }
     };
 
+    bool RegisterNativeMenu()
+    {
+        if (g_registered.load()) return true;
+        if (auto* ui = RE::UI::GetSingleton()) {
+            ui->Register(kMenuName, NativeMenu::Creator);
+            g_registered = true;
+            SKSE::log::info("Registered UHM native IMenu host after D3D initialization");
+            return true;
+        }
+        SKSE::log::error("Could not register UHM native IMenu host: UI singleton unavailable");
+        return false;
+    }
+
+    struct D3DInitHook
+    {
+        static void Thunk()
+        {
+            func();
+            auto* renderer = RE::BSGraphics::Renderer::GetSingleton();
+            if (!renderer) {
+                SKSE::log::critical("UHM renderer hook ran without Skyrim renderer");
+                return;
+            }
+            const auto& runtime = renderer->GetRuntimeData();
+            if (!runtime.renderWindows || !runtime.renderWindows->swapChain) {
+                SKSE::log::critical("UHM renderer hook ran without Skyrim swap chain");
+                return;
+            }
+            auto* swapChain = reinterpret_cast<IDXGISwapChain*>(runtime.renderWindows->swapChain);
+            auto* device = reinterpret_cast<ID3D11Device*>(runtime.forwarder);
+            auto* context = reinterpret_cast<ID3D11DeviceContext*>(runtime.context);
+            if (InitializeRenderer(swapChain, device, context)) RegisterNativeMenu();
+        }
+
+        static inline REL::Relocation<decltype(Thunk)> func;
+    };
+
     void QueueVisibility(const bool open)
     {
         g_requestedOpen = open;
@@ -411,24 +599,59 @@ namespace
 
 namespace UHI::NativeImGuiHost
 {
+    void SubmitMouseWheel(const float delta) noexcept
+    {
+        if (delta > 0.0F) {
+            g_pendingMouseWheelSteps.fetch_add(1, std::memory_order_relaxed);
+        } else if (delta < 0.0F) {
+            g_pendingMouseWheelSteps.fetch_sub(1, std::memory_order_relaxed);
+        }
+    }
+
+    bool InstallRendererHook()
+    {
+        if (g_rendererHookInstalled.load()) return true;
+        const auto version = REL::Module::get().version();
+        const auto layout = NativeRendererHookLayoutForVersion(
+            version.major(), version.minor(), version.patch(), version.build());
+        if (!layout) {
+            SKSE::log::critical("UHM native renderer disabled: Skyrim {} has no verified D3D hook layout",
+                version.string());
+            return false;
+        }
+
+        const auto callSite = REL::ID(layout->d3dInitRelocationID).address() +
+            layout->d3dInitCallOffset;
+        if (*reinterpret_cast<const std::uint8_t*>(callSite) != 0xE8) {
+            SKSE::log::critical("UHM native renderer disabled: unexpected opcode at D3D init hook site");
+            return false;
+        }
+        auto& trampoline = SKSE::GetTrampoline();
+        D3DInitHook::func = trampoline.write_call<5>(callSite, D3DInitHook::Thunk);
+        g_rendererHookInstalled = true;
+        SKSE::log::info("Installed UHM D3D initialization hook for Skyrim {}", version.string());
+        return true;
+    }
+
     bool Register(const RenderCallback callback)
     {
+        if (!callback) return false;
         g_renderCallback = callback;
-        if (g_registered.exchange(true)) return true;
-        if (auto* ui = RE::UI::GetSingleton()) {
-            ui->Register(kMenuName, NativeMenu::Creator);
-            SKSE::log::info("Registered UHM native IMenu host");
-            return true;
-        }
-        g_registered = false;
-        SKSE::log::error("Could not register UHM native IMenu host: UI singleton unavailable");
-        return false;
+        return true;
+    }
+
+    bool Open()
+    {
+        if (!IsReady()) return false;
+        if (!g_requestedOpen.load() && !g_open.load()) QueueVisibility(true);
+        return true;
     }
 
     bool Toggle()
     {
-        if (!g_registered.load()) return false;
-        QueueVisibility(!g_requestedOpen.load());
+        if (!IsReady()) return false;
+        const bool opening = !g_requestedOpen.load();
+        QueueVisibility(opening);
         return true;
     }
 
@@ -442,5 +665,11 @@ namespace UHI::NativeImGuiHost
     bool IsOpen() noexcept
     {
         return g_requestedOpen.load() || g_open.load();
+    }
+
+    bool IsReady() noexcept
+    {
+        return g_registered.load() && g_rendererInitialized && g_imguiContext &&
+            g_win32Initialized && g_dx11Initialized;
     }
 }

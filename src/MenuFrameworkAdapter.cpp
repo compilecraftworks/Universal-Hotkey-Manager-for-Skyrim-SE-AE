@@ -1,4 +1,5 @@
 #include "UHI/MenuFrameworkAdapter.h"
+#include "UHI/EscapeCloseGuard.h"
 #include "UHI/BindingSerializer.h"
 #include "UHI/Registry.h"
 #include "UHI/HotkeyViewModel.h"
@@ -123,8 +124,11 @@ namespace
     std::atomic_bool g_renderWindowVisible{ false };
     // The next render frame explicitly gives the native ImGui window focus.
     std::atomic_bool g_focusWindowOnNextRender{ false };
-    std::atomic_bool g_suppressWindowCloseUntilEscapeRelease{ false };
-    std::atomic_int64_t g_suppressWindowCloseUntilMilliseconds{ 0 };
+    // A physical Escape that cancels a popup/capture remains owned by that
+    // child UI through key-up and two render boundaries. A plain boolean was
+    // insufficient because key-up can be delivered before ImGui renders the
+    // popup close, allowing the parent window to consume the same press.
+    UHI::EscapeCloseGuard g_escapeCloseGuard;
     bool g_escapeConsumedByPopupThisFrame{};
     std::atomic_bool g_bindingCaptureActive{ false };
     std::mutex g_editorMutex;
@@ -172,13 +176,17 @@ namespace
             std::chrono::steady_clock::now().time_since_epoch()).count();
     }
 
-    void SuppressWindowCloseForEscapePress() noexcept
+    void OwnEscapeForChildUi() noexcept
     {
         // The same physical Escape press may be observed once by ImGui and
-        // once by Skyrim's input sink. Keep it from closing both the popup
-        // and the parent window, without leaving a permanent latch behind.
-        g_suppressWindowCloseUntilEscapeRelease = true;
-        g_suppressWindowCloseUntilMilliseconds.store(MonotonicMilliseconds() + 500);
+        // once by Skyrim's input sink. Give the press exclusively to the
+        // child UI until key-up and a clean follow-up frame are complete.
+        g_escapeCloseGuard.Own(MonotonicMilliseconds());
+    }
+
+    void FinishReleasedChildEscapeAfterRender(const bool escapeStillVisible) noexcept
+    {
+        g_escapeCloseGuard.CompleteRender(escapeStillVisible);
     }
 
     bool HasImGuiContext()
@@ -357,7 +365,9 @@ namespace
             // physical Escape has already cancelled one UI layer so it can
             // never close the parent window during the same frame.
             g_escapeConsumedByPopupThisFrame = true;
-            SuppressWindowCloseForEscapePress();
+            if (g_escapeCloseGuard.CurrentPhase() == UHI::EscapeCloseGuard::Phase::idle) {
+                OwnEscapeForChildUi();
+            }
         }
         return requested || escapePressed;
     }
@@ -2236,18 +2246,18 @@ namespace
             ImGui::TableSetColumnIndex(0);
             const bool deviceViewSelected = g_categoryMapView;
             if (deviceViewSelected) {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.10F, 0.55F, 0.65F, 1.0F));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.14F, 0.64F, 0.74F, 1.0F));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.08F, 0.47F, 0.57F, 1.0F));
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.28F, 0.30F, 0.33F, 1.0F));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.34F, 0.36F, 0.39F, 1.0F));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.23F, 0.25F, 0.28F, 1.0F));
             }
             if (ImGui::Button(deviceView, deviceButtonSize)) g_categoryMapView = true;
             if (deviceViewSelected) ImGui::PopStyleColor(3);
             ImGui::SameLine();
             const bool bindingViewSelected = !g_categoryMapView;
             if (bindingViewSelected) {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.10F, 0.55F, 0.65F, 1.0F));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.14F, 0.64F, 0.74F, 1.0F));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.08F, 0.47F, 0.57F, 1.0F));
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.28F, 0.30F, 0.33F, 1.0F));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.34F, 0.36F, 0.39F, 1.0F));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.23F, 0.25F, 0.28F, 1.0F));
             }
             if (ImGui::Button(bindingView, bindingButtonSize)) g_categoryMapView = false;
             if (bindingViewSelected) ImGui::PopStyleColor(3);
@@ -2384,7 +2394,11 @@ namespace
                 // follows the natural end of the text instead of forcing the
                 // label into a reserved, ellipsized slot at the column edge.
                 const std::string renameButtonId = std::string(renameLabel) + "##RenameAction";
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22F, 0.24F, 0.27F, 1.0F));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30F, 0.32F, 0.35F, 1.0F));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.18F, 0.20F, 0.23F, 1.0F));
                 if (ImGui::SmallButton(renameButtonId.c_str())) BeginActionRename(record);
+                ImGui::PopStyleColor(3);
                 ImGui::TableSetColumnIndex(2);
                 ImGui::TextUnformatted(record.owner.c_str());
                 ImGui::TableSetColumnIndex(3);
@@ -2407,7 +2421,11 @@ namespace
                     ImGui::SameLine();
                     const std::string bindingButtonId = std::string(UiText("Edit", "변경", "修改")) +
                         "##ChangeBinding";
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22F, 0.24F, 0.27F, 1.0F));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30F, 0.32F, 0.35F, 1.0F));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.18F, 0.20F, 0.23F, 1.0F));
                     if (ImGui::SmallButton(bindingButtonId.c_str())) BeginBindingEdit(record);
+                    ImGui::PopStyleColor(3);
                 }
                 ImGui::TableSetColumnIndex(7);
                 ImGui::TextDisabled("%s", ConfidenceName(record.confidence));
@@ -2674,7 +2692,7 @@ namespace
                 const float captureWidth = (std::min)(captureAvailable.x, 720.0F * g_uiScale);
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                     (std::max)(0.0F, (captureAvailable.x - captureWidth) * 0.5F));
-                if (capturing) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12F, 0.43F, 0.53F, 1.0F));
+                if (capturing) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.28F, 0.30F, 0.33F, 1.0F));
                 if (ImGui::Button(captureText.c_str(), ImVec2(captureWidth, 46.0F * g_uiScale))) {
                     g_bindingCaptureStatus.clear();
                     g_bindingCaptureActive = true;
@@ -2765,7 +2783,19 @@ namespace
         if (!HasImGuiContext()) {
             return;
         }
-        g_escapeConsumedByPopupThisFrame = false;
+        const bool escapePressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+        const bool popupOrCaptureActive = g_modalInputActive.load() ||
+            g_openingHotkeyCaptureActive.load() ||
+            g_bindingCaptureActive.load() ||
+            ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId);
+        if (escapePressed && popupOrCaptureActive &&
+            g_escapeCloseGuard.CurrentPhase() == UHI::EscapeCloseGuard::Phase::idle) {
+            OwnEscapeForChildUi();
+        }
+        const bool childUiOwnedEscape =
+            g_escapeCloseGuard.CurrentPhase() != UHI::EscapeCloseGuard::Phase::idle &&
+            UHI::IsMenuFrameworkEscapeCloseSuppressed();
+        g_escapeConsumedByPopupThisFrame = childUiOwnedEscape;
         g_renderWindowVisible = true;
         // Hold one immutable result snapshot for the complete ImGui frame. A
         // worker may publish a newer scan without invalidating entry pointers.
@@ -2803,7 +2833,10 @@ namespace
         const float layoutScale = std::clamp(g_uiScale, 0.80F, 1.35F);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.5F * layoutScale);
         ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 0.5F * layoutScale);
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0F);
+        // Inputs, sliders, progress tracks and compact action buttons need a
+        // visible surface, but the UI should still feel light.  A sub-pixel
+        // border at the base scale is enough to separate them from the window.
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.60F * layoutScale);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0F * layoutScale);
         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0F * layoutScale);
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0F * layoutScale);
@@ -2811,6 +2844,14 @@ namespace
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(9.0F * layoutScale, 7.0F * layoutScale));
         ImGui::PushStyleVar(ImGuiStyleVar_TabBorderSize, 1.0F);
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.36F, 0.40F, 0.46F, 0.42F));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.028F, 0.035F, 0.045F, 0.92F));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.050F, 0.062F, 0.078F, 0.96F));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.070F, 0.092F, 0.118F, 0.98F));
+        ImGui::PushStyleColor(ImGuiCol_SliderGrab, ImVec4(0.31F, 0.39F, 0.47F, 0.76F));
+        ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, ImVec4(0.40F, 0.53F, 0.64F, 0.90F));
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13F, 0.14F, 0.15F, 0.94F));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.19F, 0.20F, 0.22F, 0.98F));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.25F, 0.26F, 0.28F, 1.0F));
         ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.36F, 0.40F, 0.46F, 0.32F));
         // Device-map children should visually share the main window background.
         // A transparent child background preserves the configured window opacity
@@ -2818,9 +2859,9 @@ namespace
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
         ImGui::PushStyleColor(ImGuiCol_Tab, ImVec4(0.08F, 0.10F, 0.13F, 0.92F));
         ImGui::PushStyleColor(ImGuiCol_TabHovered, ImVec4(0.18F, 0.39F, 0.49F, 0.96F));
-        ImGui::PushStyleColor(ImGuiCol_TabActive, ImVec4(0.14F, 0.48F, 0.54F, 1.0F));
+        ImGui::PushStyleColor(ImGuiCol_TabActive, ImVec4(0.92F, 0.94F, 0.97F, 1.0F));
         ImGui::PushStyleColor(ImGuiCol_TabUnfocused, ImVec4(0.07F, 0.08F, 0.11F, 0.88F));
-        ImGui::PushStyleColor(ImGuiCol_TabUnfocusedActive, ImVec4(0.12F, 0.38F, 0.44F, 0.96F));
+        ImGui::PushStyleColor(ImGuiCol_TabUnfocusedActive, ImVec4(0.92F, 0.94F, 0.97F, 0.78F));
         ImGui::PushStyleColor(ImGuiCol_TextDisabled, ImVec4(0.94F, 0.96F, 0.99F, 1.0F));
         ImGui::PushStyleColor(ImGuiCol_TitleBg, ImVec4(0.0F, 0.0F, 0.0F, 1.0F));
         ImGui::PushStyleColor(ImGuiCol_TitleBgActive, ImVec4(0.0F, 0.0F, 0.0F, 1.0F));
@@ -3110,6 +3151,17 @@ namespace
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
+
+            // Keep the navigation rule independent from the darker separators
+            // used inside the Options page.  This makes the category boundary
+            // consistently visible without changing the category tab colors.
+            const ImVec2 tabRuleStart = ImGui::GetCursorScreenPos();
+            const float tabRuleWidth = (std::max)(0.0F, ImGui::GetContentRegionAvail().x);
+            ImGui::GetWindowDrawList()->AddLine(
+                tabRuleStart,
+                ImVec2(tabRuleStart.x + tabRuleWidth, tabRuleStart.y),
+                ImGui::GetColorU32(ImVec4(0.94F, 0.95F, 0.97F, 0.72F)),
+                (std::max)(1.0F, layoutScale));
         }
         ImGui::SetWindowFontScale(g_uiScale);
         ImGui::Spacing();
@@ -3463,8 +3515,8 @@ namespace
                     UiText("Press a keyboard shortcut...", "변경할 단축키를 누르세요...", "请按下新的键盘快捷键...") :
                     UHI::FormatOpeningHotkey(preferencesDraft);
                 if (capturing) {
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12F, 0.43F, 0.53F, 1.0F));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.14F, 0.50F, 0.60F, 1.0F));
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.28F, 0.30F, 0.33F, 1.0F));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.34F, 0.36F, 0.39F, 1.0F));
                 }
                 const float captureWidth = (std::min)(560.0F * g_uiScale,
                     shortcutAvailable.x - 140.0F * g_uiScale);
@@ -3624,8 +3676,13 @@ namespace
             UHI::CloseMenuFrameworkWindow();
             open = false;
         }
+        // Key-up may precede popup teardown. Keep ownership for this render
+        // and one subsequent clean render so one physical Escape can close
+        // exactly one UI layer even when input/render ordering varies.
+        FinishReleasedChildEscapeAfterRender(
+            ImGui::IsKeyDown(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_Escape, false));
         ImGui::End();
-        ImGui::PopStyleColor(12);
+        ImGui::PopStyleColor(20);
         ImGui::PopStyleVar(9);
     }
 
@@ -3656,6 +3713,19 @@ namespace UHI
     void SetMenuFrameworkSexLabInstalled(const bool installed) noexcept
     {
         g_sexLabInstalled.store(installed);
+    }
+
+    bool OpenMenuFrameworkWindow()
+    {
+        if (IsMenuFrameworkWindowOpen()) return true;
+        g_automaticRefreshRequestedForCurrentOpen = false;
+        g_focusWindowOnNextRender = true;
+        if (!NativeImGuiHost::Open()) {
+            g_focusWindowOnNextRender = false;
+            return false;
+        }
+        g_renderWindowVisible = true;
+        return true;
     }
 
     bool ToggleMenuFrameworkWindow()
@@ -3739,7 +3809,7 @@ namespace UHI
     {
         // This function is also reached from the Skyrim input sink when Escape
         // cancels capture. Keep that physical press from closing the parent.
-        SuppressWindowCloseForEscapePress();
+        OwnEscapeForChildUi();
         g_openingHotkeyCaptureActive = false;
     }
 
@@ -3750,23 +3820,16 @@ namespace UHI
 
     bool IsMenuFrameworkEscapeCloseSuppressed() noexcept
     {
-        const auto deadline = g_suppressWindowCloseUntilMilliseconds.load();
-        if (deadline <= 0) return false;
-        if (MonotonicMilliseconds() >= deadline) {
-            // Some input stacks do not deliver the Escape release after the
-            // down event was deliberately stopped.  Expire the popup-only
-            // guard so a later, separate Escape can always close UHM.
-            g_suppressWindowCloseUntilEscapeRelease = false;
-            g_suppressWindowCloseUntilMilliseconds = 0;
-            return false;
-        }
-        return g_suppressWindowCloseUntilEscapeRelease.load();
+        // Some input stacks do not deliver Escape release after the down event
+        // was stopped. The guard expires so a later press can still close UHM.
+        return g_escapeCloseGuard.IsSuppressed(MonotonicMilliseconds());
     }
 
     void ReleaseMenuFrameworkEscapeCloseSuppression() noexcept
     {
-        g_suppressWindowCloseUntilEscapeRelease = false;
-        g_suppressWindowCloseUntilMilliseconds = 0;
+        // Key-up does not release parent ownership immediately. Render must
+        // first acknowledge both popup teardown and one clean follow-up frame.
+        g_escapeCloseGuard.Release();
     }
 
     bool IsMenuFrameworkBindingCaptureActive() noexcept
@@ -3806,7 +3869,7 @@ namespace UHI
 
     void CancelMenuFrameworkBindingCapture() noexcept
     {
-        SuppressWindowCloseForEscapePress();
+        OwnEscapeForChildUi();
         g_bindingCaptureActive = false;
     }
 
@@ -3814,8 +3877,8 @@ namespace UHI
     {
         // The input sink may run outside the ImGui render path. Request a
         // render-thread close instead of mutating popup state concurrently.
+        OwnEscapeForChildUi();
         g_cancelActivePopupRequested = true;
-        SuppressWindowCloseForEscapePress();
         g_bindingCaptureActive = false;
     }
 

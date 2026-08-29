@@ -154,6 +154,20 @@ namespace
             extension == ".cfg" || extension == ".conf" || extension == ".settings" || extension == ".properties";
     }
 
+    bool IsGeneratedUhmReport(const std::filesystem::path& path)
+    {
+        bool insideUhmDirectory{};
+        for (const auto& component : path) {
+            const auto name = Lower(UHI::PathToUtf8(component));
+            if (name == "universalhotkeymanager") {
+                insideUhmDirectory = true;
+                continue;
+            }
+            if (insideUhmDirectory && name == "reports") return true;
+        }
+        return false;
+    }
+
     void ScanExternalRoot(const std::filesystem::path& root, const UHI::CancelCallback& cancel,
         const UHI::PathCallback& path, std::vector<UHI::HotkeyRecord>& records)
     {
@@ -167,6 +181,7 @@ namespace
             try {
                 std::error_code entryError;
                 if (!entry.is_regular_file(entryError) || entryError || !IsExternalData(entry.path()) ||
+                    IsGeneratedUhmReport(entry.path()) ||
                     entry.file_size(entryError) > kMaximumExternalFile || entryError) continue;
                 UHI::ReportScanPath(path, entry.path());
                 std::ifstream input(entry.path(), std::ios::binary);

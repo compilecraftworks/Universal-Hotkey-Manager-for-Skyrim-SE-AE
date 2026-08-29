@@ -238,8 +238,13 @@ namespace UHI
             std::ofstream output(temporary, std::ios::trunc);
             if (!output) return false;
             output << "; Universal Hotkey Manager for Skyrim SE-AE native settings\n"
-                   << "; ToggleKey is a DirectInput keyboard scan code. 0xD3 = Delete.\n"
-                   << "; Modifier flags match either the left or right key.\n"
+                   << "; Current shortcut: " << FormatOpeningHotkey(hotkey) << "\n"
+                   << "; ToggleKey is a DirectInput (DX) keyboard scan code; hexadecimal and decimal are accepted.\n"
+                   << "; DX scan-code reference: https://ck.uesp.net/wiki/Input_Script#DXScanCodes\n"
+                   << "; Examples: F1=0x3B, F2=0x3C, F4=0x3E, F8=0x42, F11=0x57, Delete=0xD3.\n"
+                   << "; Modifier flags accept either side when the matching *Key value is 0x0.\n"
+                   << "; Exact modifier codes: LCtrl=0x1D, RCtrl=0x9D, LShift=0x2A, RShift=0x36,\n"
+                   << ";                       LAlt=0x38, RAlt=0xB8.\n"
                    << "[General]\nToggleKey=0x" << std::hex << std::uppercase << hotkey.scanCode << std::dec
                    << "\nCtrl=" << (hotkey.ctrl ? "true" : "false")
                    << "\nShift=" << (hotkey.shift ? "true" : "false")

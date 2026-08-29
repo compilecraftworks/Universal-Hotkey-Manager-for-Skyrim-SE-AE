@@ -61,6 +61,8 @@ int main()
     const auto ae1129Layout = UHI::SkyrimInputContextLayoutForVersion(1, 6, 1129);
     const auto ae1130Layout = UHI::SkyrimInputContextLayoutForVersion(1, 6, 1130);
     const auto ae1170Layout = UHI::SkyrimInputContextLayoutForVersion(1, 6, 1170);
+    const auto seRenderer = UHI::NativeRendererHookLayoutForVersion(1, 5, 97, 0);
+    const auto aeRenderer = UHI::NativeRendererHookLayoutForVersion(1, 6, 1170, 0);
     if (!seLayout || seLayout->runtimeContextCount != 17 || seLayout->hasMarketplaceContext ||
         seLayout->CanonicalContextIndex(16) != UHI::kCanonicalFavorContextIndex ||
         !ae640Layout || ae640Layout->runtimeContextCount != 17 || ae640Layout->hasMarketplaceContext ||
@@ -72,6 +74,14 @@ int main()
         !ae1170Layout || ae1170Layout->runtimeContextCount != 18 || !ae1170Layout->hasMarketplaceContext ||
         UHI::SkyrimInputContextLayoutForVersion(1, 7, 0).has_value()) {
         return fail("SE/AE input-context layout boundary");
+    }
+    if (!seRenderer || seRenderer->d3dInitRelocationID != 75595 ||
+        seRenderer->d3dInitCallOffset != 0x50 ||
+        !aeRenderer || aeRenderer->d3dInitRelocationID != 77226 ||
+        aeRenderer->d3dInitCallOffset != 0x2BC ||
+        UHI::NativeRendererHookLayoutForVersion(1, 6, 1171, 0).has_value() ||
+        UHI::NativeRendererHookLayoutForVersion(1, 6, 1170, 1).has_value()) {
+        return fail("SE/AE native-renderer hook layout boundary");
     }
     std::error_code error;
     std::filesystem::remove_all(root, error);

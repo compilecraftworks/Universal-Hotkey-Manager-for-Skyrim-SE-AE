@@ -2,6 +2,8 @@
 
 ## 1.0.6 - 2026-08-28
 
+- Limited the native font atlas to the supported English, Korean, and Simplified Chinese UI ranges, removed the unused Japanese glyph range, and added a D3D11 font-texture preflight so an unsupported atlas fails closed instead of crashing on the first menu frame.
+- Moved Dear ImGui Win32/DX11 initialization out of the opening-hotkey path and into Skyrim's verified D3D initialization hook. The native menu is registered only after the renderer is fully ready, so an early or unsupported `Del` press fails closed instead of pausing an invisible menu or crashing on the next press.
 - Replaced the SKSE Menu Framework runtime dependency with UHM's own Skyrim `IMenu` and statically linked Dear ImGui Win32/DX11 host while preserving the existing layout, scaling, language, popup, cache, scanner, and editor behavior.
 - Fixed direct-opening input ownership so mouse, keyboard, and gamepad events reach Skyrim's menu controls without leaking into gameplay; Escape now cancels the active popup/capture first or closes UHM without opening Skyrim's system menu.
 - Expanded active-VFS configuration discovery to supported settings files anywhere below `Data`, while retaining resource/default exclusions and per-file caching.
@@ -9,6 +11,8 @@
 - Improved generic PEX data-flow through custom getter helpers so MCM/runtime properties retain their semantic action identity when they reach key-map registration APIs.
 - Kept unresolved static PEX/DLL input candidates hidden and read-only until active runtime evidence confirms them, preventing analyzer internals from appearing as hotkeys.
 - Added anonymous regression fixtures for representative navigation, scene-start, furniture, widget, staged-flow, and native-MCM layouts without adding any mod-name-specific detection rules.
+- Added an external C API for opening and closing UHM, querying menu visibility, and disabling only UHM's native opening hotkey, with a bundled consumer header and `GetProcAddress` example.
+- Refined the native UI with neutral-grey action and popup buttons, subtly framed inputs, sliders, and progress bars, and a white separator below the category tabs while preserving category colors in tabs and device maps.
 
 ## 1.0.5 - 2026-08-26
 

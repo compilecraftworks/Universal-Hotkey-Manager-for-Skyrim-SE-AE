@@ -81,6 +81,7 @@ if(UHI_BUILD_SKSE)
             src/plugin.cpp
             src/MenuFrameworkAdapter.cpp
             src/NativeImGuiHost.cpp
+            src/RuntimeAPI.cpp
             resources/UniversalHotkeyManager.rc
     )
     target_link_libraries(UniversalHotkeyManager PRIVATE uhi_core imgui::imgui)
@@ -95,6 +96,11 @@ endif()
 
 if(UHI_BUILD_TESTS)
     enable_testing()
+    if(WIN32)
+        # Compile the public GetProcAddress consumer example on every test
+        # build so the shipped declarations cannot silently drift.
+        add_library(uhi_menu_api_consumer_compile OBJECT tests/MenuApiConsumer.cpp)
+    endif()
     add_executable(uhi_tests tests/ReShadeScannerTests.cpp)
     target_link_libraries(uhi_tests PRIVATE uhi_core)
     add_test(NAME uhi_tests COMMAND uhi_tests)
@@ -158,4 +164,7 @@ if(UHI_BUILD_TESTS)
     add_executable(uhi_state_dependency_tests tests/StateAndDependencyTests.cpp)
     target_link_libraries(uhi_state_dependency_tests PRIVATE uhi_core)
     add_test(NAME uhi_state_dependency_tests COMMAND uhi_state_dependency_tests)
+    add_executable(uhi_escape_close_guard_tests tests/EscapeCloseGuardTests.cpp)
+    target_include_directories(uhi_escape_close_guard_tests PRIVATE include)
+    add_test(NAME uhi_escape_close_guard_tests COMMAND uhi_escape_close_guard_tests)
 endif()

@@ -2,7 +2,9 @@
 #include "UHI/Registry.h"
 #include "UHI/PathEncoding.h"
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -82,6 +84,28 @@ namespace
         }
     }
 
+    std::string Lower(std::string value)
+    {
+        std::ranges::transform(value, value.begin(), [](const unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+        return value;
+    }
+
+    bool IsGeneratedUhmReport(const std::filesystem::path& path)
+    {
+        bool insideUhmDirectory{};
+        for (const auto& component : PhysicalEvidencePath(path)) {
+            const auto name = Lower(UHI::PathToUtf8(component));
+            if (name == "universalhotkeymanager") {
+                insideUhmDirectory = true;
+                continue;
+            }
+            if (insideUhmDirectory && name == "reports") return true;
+        }
+        return false;
+    }
+
     bool WriteRecord(std::ostream& output, const UHI::HotkeyRecord& value)
     {
         if (!WriteString(output, value.owner) || !WriteString(output, value.action) ||
@@ -157,8 +181,12 @@ namespace UHI
             if (!output) return false;
             output.write(kMagic.data(), static_cast<std::streamsize>(kMagic.size()));
             Write(output, kSchemaVersion);
-            Write(output, static_cast<std::uint32_t>(records.size()));
+            const auto storedCount = static_cast<std::uint32_t>(std::ranges::count_if(records, [](const auto& record) {
+                return !IsGeneratedUhmReport(record.evidencePath);
+            }));
+            Write(output, storedCount);
             for (const auto& record : records) {
+                if (IsGeneratedUhmReport(record.evidencePath)) continue;
                 if (!WriteRecord(output, record)) {
                     output.close();
                     std::filesystem::remove(temporary, error);
@@ -201,15 +229,22 @@ namespace UHI
             input.read(magic.data(), static_cast<std::streamsize>(magic.size()));
             if (!input || magic != kMagic || !Read(input, schema) || schema != kSchemaVersion ||
                 !Read(input, count) || count > Registry::kDefaultMaxRecords) return std::nullopt;
-            std::vector<HotkeyRecord> records(count);
-            for (auto& record : records) {
+            std::vector<HotkeyRecord> records;
+            records.reserve(count);
+            for (std::uint32_t index = 0; index < count; ++index) {
+                HotkeyRecord record;
                 Fingerprint expected;
                 if (!ReadRecord(input, record, expected)) return std::nullopt;
+                // Older snapshots may contain reports written by UHM itself.
+                // Drop those records before fingerprint validation so a changed
+                // report cannot invalidate an otherwise useful cache.
+                if (IsGeneratedUhmReport(record.evidencePath)) continue;
                 NormalizeRecordDisplayNames(record);
                 if (validateFingerprints && expected.valid) {
                     const auto current = FingerprintFile(record.evidencePath);
                     if (!current.valid || current != expected) return std::nullopt;
                 }
+                records.push_back(std::move(record));
             }
             return records;
         } catch (...) {

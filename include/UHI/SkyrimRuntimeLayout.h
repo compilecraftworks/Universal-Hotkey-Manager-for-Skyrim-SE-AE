@@ -24,6 +24,41 @@ namespace UHI
         }
     };
 
+    struct NativeRendererHookLayout
+    {
+        std::uint64_t d3dInitRelocationID{ 0 };
+        std::uintptr_t d3dInitCallOffset{ 0 };
+    };
+
+    [[nodiscard]] constexpr std::optional<NativeRendererHookLayout>
+        NativeRendererHookLayoutForVersion(
+        const std::uint16_t major, const std::uint16_t minor,
+        const std::uint16_t patch, const std::uint16_t build) noexcept
+    {
+        if (major != 1 || build != 0) return std::nullopt;
+        if (minor == 5 && patch == 97) {
+            return NativeRendererHookLayout{ 75595, 0x50 };
+        }
+        if (minor != 6) return std::nullopt;
+        switch (patch) {
+        case 317:
+        case 318:
+        case 323:
+        case 342:
+        case 353:
+        case 629:
+        case 640:
+        case 659:
+        case 678:
+        case 1130:
+        case 1170:
+        case 1179:
+            return NativeRendererHookLayout{ 77226, 0x2BC };
+        default:
+            return std::nullopt;
+        }
+    }
+
     [[nodiscard]] constexpr std::optional<SkyrimInputContextLayout>
         SkyrimInputContextLayoutForVersion(
         const std::uint16_t major, const std::uint16_t minor,

@@ -11,6 +11,7 @@ namespace UHI
     bool RegisterMenuFrameworkWindow();
     void SetMenuFrameworkRegistry(std::shared_ptr<const Registry> registry, bool restored = false);
     void SetMenuFrameworkSexLabInstalled(bool installed) noexcept;
+    bool OpenMenuFrameworkWindow();
     bool ToggleMenuFrameworkWindow();
     bool CloseMenuFrameworkWindow();
     bool IsMenuFrameworkWindowOpen() noexcept;

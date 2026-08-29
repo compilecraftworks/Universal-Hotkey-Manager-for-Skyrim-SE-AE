@@ -55,10 +55,15 @@ int main()
     const auto documents = root / "Documents";
     const auto gameBase = documents / "My Games" / "Skyrim Special Edition";
     std::filesystem::create_directories(gameBase / "JCUser");
+    std::filesystem::create_directories(gameBase / "SKSE" / "UniversalHotkeyManager" / "reports");
     std::filesystem::create_directories(gameBase / "Saves");
     {
         std::ofstream json(gameBase / "JCUser" / "hotkeys.txt");
         json << R"({"MenuHotkey":259})";
+    }
+    {
+        std::ofstream report(gameBase / "SKSE" / "UniversalHotkeyManager" / "reports" / "hotkeys.json");
+        report << R"({"owner":"reports","DisplayBinding":60,"Hotkey":61})";
     }
     MakeCoSave(gameBase / "Saves" / "Current.skse");
 
@@ -71,10 +76,14 @@ int main()
         return record.binding == "A" && record.device == "gamepad" &&
             record.detector == "SkseCoSaveKeyRegistry" && record.conflictEligible;
     });
+    const auto scannedOwnReport = std::ranges::any_of(records, [](const auto& record) {
+        return record.owner == "reports" ||
+            record.evidencePath.generic_string().find("UniversalHotkeyManager/reports") != std::string::npos;
+    });
     const auto cancelled = UHI::Scanners::UserDataScanner{}.Scan(
         root / "Game", "Current.ess", [] { return true; }, documents);
     std::filesystem::remove_all(root, error);
-    if (persistent == records.end() || registeredCount != 2 || !cancelled.empty()) {
+    if (persistent == records.end() || registeredCount != 2 || scannedOwnReport || !cancelled.empty()) {
         std::cerr << "User data scanner test failed\n";
         return 1;
     }

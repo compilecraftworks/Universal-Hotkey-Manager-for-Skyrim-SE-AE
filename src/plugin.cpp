@@ -2,6 +2,8 @@
 #include "UHI/Registry.h"
 #include "UHI/ScanPipeline.h"
 #include "UHI/MenuFrameworkAdapter.h"
+#include "UHI/NativeImGuiHost.h"
+#include "UHI/RuntimeAPI.h"
 #include "UHI/OpeningHotkey.h"
 #include "UHI/LastScanStore.h"
 #include "UHI/SexLabDependency.h"
@@ -441,6 +443,8 @@ namespace
 
     bool ToggleOpeningWindow(const std::string_view source)
     {
+        if (!UHI::RuntimeAPI::IsNativeHotkeyEnabled()) return false;
+
         // Editor modals and the opening-shortcut capture own all input until
         // they finish. In particular, the currently configured key must not
         // close UHM while the user is trying to replace it.
@@ -459,6 +463,10 @@ namespace
         const auto hotkey = GetOpeningHotkey();
         const std::string sourceText(source);
         const auto completeToggle = [hotkey, sourceText] {
+            if (!UHI::RuntimeAPI::IsNativeHotkeyEnabled()) {
+                g_openingTogglePending = false;
+                return;
+            }
             // A popup or the opening-key capture may have taken ownership in
             // the frame between the input event and this queued UI task.
             if (UHI::IsMenuFrameworkModalInputActive() ||
@@ -2025,6 +2033,11 @@ namespace
     void OnSkseMessage(SKSE::MessagingInterface::Message* message)
     {
         if (!message) return;
+        if (message->type == SKSE::MessagingInterface::kPostPostLoad) {
+            const bool installed = UHI::NativeImGuiHost::InstallRendererHook();
+            SKSE::log::info("UHM native renderer hook {}",
+                installed ? "installed" : "was not installed; opening hotkey will fail closed");
+        }
         if (message->type == SKSE::MessagingInterface::kPreLoadGame ||
             message->type == SKSE::MessagingInterface::kDeleteGame) {
             g_gameTransitioning = true;
@@ -2134,10 +2147,12 @@ namespace
                 if (UHI::IsMenuFrameworkModalInputActive()) {
                     if (button->device == RE::INPUT_DEVICE::kKeyboard &&
                         button->idCode == 0x01 && button->IsDown()) {
-                        if (UHI::IsMenuFrameworkBindingCaptureActive())
-                            UHI::CancelMenuFrameworkBindingCapture();
-                        else
-                            UHI::CancelMenuFrameworkEditorModal();
+                        // One Escape press owns exactly one close operation.
+                        // Cancelling only the capture left the popup alive and
+                        // allowed the same press to reach the main-window close
+                        // path on the next frame. Always cancel the complete
+                        // editor modal and consume this event here.
+                        UHI::CancelMenuFrameworkEditorModal();
                         ResetModalModifiers();
                         return RE::BSEventNotifyControl::kStop;
                     }
@@ -2194,6 +2209,15 @@ namespace
                 }
 
                 const bool windowOpen = UHI::IsMenuFrameworkWindowOpen();
+                if (windowOpen && button->device == RE::INPUT_DEVICE::kMouse &&
+                    button->IsDown() && (button->idCode == 8U || button->idCode == 9U)) {
+                    // Directly opened native menus do not receive a reliable
+                    // Scaleform wheel event on every input stack. Forward the
+                    // physical wheel buttons to ImGui and consume them so the
+                    // list under the cursor scrolls consistently.
+                    UHI::NativeImGuiHost::SubmitMouseWheel(button->idCode == 8U ? 1.0F : -1.0F);
+                    return RE::BSEventNotifyControl::kStop;
+                }
                 if (button->device != RE::INPUT_DEVICE::kKeyboard) {
                     // Let Skyrim's MenuControls sink translate ordinary mouse
                     // and gamepad input into the Scaleform events consumed by
@@ -2341,6 +2365,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
 {
     InitializeLogging();
     SKSE::Init(skse);
+    SKSE::AllocTrampoline(1 << 12);
     const auto openingHotkey = UHI::LoadOpeningHotkey(OpeningHotkeyPath());
     g_openingHotkeyPacked.store(PackOpeningHotkey(openingHotkey));
     g_uiScale.store(openingHotkey.uiScale);
@@ -2348,6 +2373,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
     g_uiLanguage.store(static_cast<std::uint8_t>(openingHotkey.uiLanguage));
     SKSE::GetPapyrusInterface()->Register(RegisterPapyrus);
     const bool menuRegistered = UHI::RegisterMenuFrameworkWindow();
+    UHI::RuntimeAPI::SetReady(menuRegistered);
     SKSE::log::info("UHI native ImGui window registration {}",
         menuRegistered ? "succeeded" : "failed");
     UHI::SetMenuFrameworkStartScan([] { StartScan(false); });

@@ -29,6 +29,15 @@ int main()
     if (!UHI::SaveOpeningHotkey(path, changed)) return 1;
     const auto loaded = UHI::LoadOpeningHotkey(path);
     if (loaded != changed || UHI::FormatOpeningHotkey(loaded) != "RShift+Del") return 1;
+    {
+        std::ifstream input(path, std::ios::binary);
+        const std::string saved((std::istreambuf_iterator<char>(input)),
+            std::istreambuf_iterator<char>());
+        if (!saved.contains("; Current shortcut: RShift+Del") ||
+            !saved.contains("https://ck.uesp.net/wiki/Input_Script#DXScanCodes") ||
+            !saved.contains("Delete=0xD3") ||
+            !saved.contains("RShift=0x36")) return 1;
+    }
 
     {
         std::ofstream output(path, std::ios::trunc);

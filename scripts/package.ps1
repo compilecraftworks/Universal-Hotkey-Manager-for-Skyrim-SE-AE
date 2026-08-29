@@ -12,9 +12,10 @@ $buildRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $BuildDirecto
 $outputRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $OutputDirectory))
 $stagingRoot = Join-Path $outputRoot '.staging'
 $releaseStage = Join-Path $stagingRoot 'release'
+$sourceStage = Join-Path $stagingRoot 'source'
 $dllSource = Join-Path $buildRoot 'UniversalHotkeyManager.dll'
 
-foreach ($path in @($buildRoot, $outputRoot, $stagingRoot, $releaseStage)) {
+foreach ($path in @($buildRoot, $outputRoot, $stagingRoot, $releaseStage, $sourceStage)) {
     if (-not $path.StartsWith($projectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Packaging path escapes the project directory: $path"
     }
@@ -43,6 +44,7 @@ if (Test-Path -LiteralPath $stagingRoot) {
 New-Item -ItemType Directory -Path (Join-Path $releaseStage 'SKSE/Plugins') -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $releaseStage 'SKSE/Plugins/UniversalHotkeyManager/assets') -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $releaseStage 'ThirdPartyLicenses') -Force | Out-Null
+New-Item -ItemType Directory -Path $sourceStage -Force | Out-Null
 
 Copy-Item -LiteralPath $dllSource -Destination (Join-Path $releaseStage 'SKSE/Plugins/UniversalHotkeyManager.dll')
 Copy-Item -LiteralPath (Join-Path $projectRoot 'config/UniversalHotkeyManager.ini') `
@@ -77,22 +79,52 @@ foreach ($package in $licensePackages) {
 }
 
 $releaseZip = Join-Path $outputRoot "Universal Hotkey Manager for Skyrim SE-AE $Version.zip"
-$legacySourceZip = Join-Path $outputRoot "Universal Hotkey Manager for Skyrim SE-AE $Version - Source.zip"
+$sourceZip = Join-Path $outputRoot "Universal Hotkey Manager for Skyrim SE-AE $Version - Source.zip"
 if (Test-Path -LiteralPath $releaseZip) {
     Remove-Item -LiteralPath $releaseZip -Force
 }
-if (Test-Path -LiteralPath $legacySourceZip) {
-    Remove-Item -LiteralPath $legacySourceZip -Force
+if (Test-Path -LiteralPath $sourceZip) {
+    Remove-Item -LiteralPath $sourceZip -Force
 }
 
 Compress-Archive -Path (Join-Path $releaseStage '*') -DestinationPath $releaseZip -CompressionLevel Optimal
 
-$hash = Get-FileHash -LiteralPath $releaseZip -Algorithm SHA256
-$checksums = '{0}  {1}' -f $hash.Hash, (Split-Path -Leaf $releaseZip)
+$sourceFiles = @(
+    '.gitattributes', '.gitignore',
+    'CHANGELOG.md', 'CHANGELOG_KO.md', 'CMakeLists.txt', 'CMakePresets.json',
+    'CONTRIBUTING.md', 'INSTALL.md', 'LICENSE', 'README.md', 'SECURITY.md',
+    'THIRD_PARTY_NOTICES.md', 'vcpkg-configuration.json', 'vcpkg.json'
+)
+foreach ($name in $sourceFiles) {
+    $source = Join-Path $projectRoot $name
+    if (-not (Test-Path -LiteralPath $source)) {
+        throw "Required source file was not found: $source"
+    }
+    Copy-Item -LiteralPath $source -Destination $sourceStage
+}
+
+$sourceDirectories = @(
+    '.github', 'assets', 'config', 'docs', 'extras', 'include', 'mcm',
+    'resources', 'scripts', 'src', 'tests', 'vcpkg-ports'
+)
+foreach ($name in $sourceDirectories) {
+    $source = Join-Path $projectRoot $name
+    if (-not (Test-Path -LiteralPath $source)) {
+        throw "Required source directory was not found: $source"
+    }
+    Copy-Item -LiteralPath $source -Destination $sourceStage -Recurse -Force
+}
+
+Compress-Archive -Path (Join-Path $sourceStage '*') -DestinationPath $sourceZip -CompressionLevel Optimal
+
+$hashes = Get-FileHash -LiteralPath $releaseZip, $sourceZip -Algorithm SHA256
+$checksums = $hashes | ForEach-Object {
+    '{0}  {1}' -f $_.Hash, (Split-Path -Leaf $_.Path)
+}
 $checksumPath = Join-Path $outputRoot 'SHA256SUMS.txt'
 [System.IO.File]::WriteAllLines($checksumPath, $checksums, [System.Text.UTF8Encoding]::new($false))
 
 Remove-Item -LiteralPath $stagingRoot -Recurse -Force
 
-Get-Item -LiteralPath $releaseZip, $checksumPath |
+Get-Item -LiteralPath $releaseZip, $sourceZip, $checksumPath |
     Select-Object FullName, Length, LastWriteTime
