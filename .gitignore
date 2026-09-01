@@ -13,6 +13,15 @@
 *.uhi.bak
 CMakeUserPresets.json
 
+# The current public release artifacts are versioned with the source so the
+# exact distributed runtime binary, source archive, and checksum stay
+# reproducible from the repository. Historical local release drafts remain
+# ignored.
+!/releases/
+!/releases/Universal Hotkey Manager for Skyrim SE-AE 1.0.6.zip
+!/releases/Universal Hotkey Manager for Skyrim SE-AE 1.0.6 - Source.zip
+!/releases/SHA256SUMS.txt
+
 # Local publishing copy for external mod sites
 NEXUS_DESCRIPTION_BBCODE.md
 NEXUS_DESCRIPTION_KO_HTML.html
