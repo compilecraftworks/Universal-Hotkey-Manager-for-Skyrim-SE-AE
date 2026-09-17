@@ -16,7 +16,7 @@ namespace UHI
         // v7 persists effective-runtime state and exact structured-setting
         // locators used by the safe configuration writer.
         // Keep restored UI snapshots in lockstep with scanner/cache semantics.
-        static constexpr std::uint32_t kSchemaVersion = 10;
+        static constexpr std::uint32_t kSchemaVersion = 11;
 
         [[nodiscard]] bool Save(const std::filesystem::path& path,
             std::span<const HotkeyRecord> records) const noexcept;

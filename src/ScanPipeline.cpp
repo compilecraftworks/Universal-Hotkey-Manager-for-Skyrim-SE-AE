@@ -34,6 +34,16 @@ namespace
 
 namespace UHI
 {
+    void ApplyLoadedPluginState(std::vector<HotkeyRecord>& records,
+        const std::function<bool(std::string_view)>& isLoaded)
+    {
+        if (!isLoaded) return;
+        const bool communityShadersLoaded = isLoaded("CommunityShaders.dll");
+        for (auto& record : records) {
+            if (record.detector == "CommunityShadersScanner")
+                record.runtimeActive = communityShadersLoaded;
+        }
+    }
     std::vector<HotkeyRecord> ScanPipeline::Run(const std::filesystem::path& gameRoot,
         ProgressCallback progress, const CancelCallback& cancel,
         const std::string_view preferredSaveName) const
@@ -97,6 +107,7 @@ namespace UHI
                     .evidencePath = openingHotkeyPath,
                     .stage = ScanStage::configuration,
                     .editable = true,
+                    .runtimeActive = openingHotkey.enabled,
                     .conflictEligible = true
                 });
                 report(++completed, total, openingHotkeyPath, 100.0F);

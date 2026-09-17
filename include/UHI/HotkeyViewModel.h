@@ -28,7 +28,7 @@ namespace UHI
 
     // Read-only projection used by the device and manager views. It keeps the full record for
     // tooltips while exposing compact labels and conflict state for rendering.
-    std::vector<HotkeyViewGroup> BuildHotkeyView(const Registry& registry);
+    std::vector<HotkeyViewGroup> BuildHotkeyView(const Registry& registry, bool includeUiLocal = false);
 
     std::vector<HotkeyViewGroup> FilterHotkeyView(
         const std::vector<HotkeyViewGroup>& source,

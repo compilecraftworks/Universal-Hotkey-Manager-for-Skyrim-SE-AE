@@ -24,6 +24,11 @@ namespace UHI
         bool finished{};
     };
 
+    // Re-evaluate loaded-plugin evidence after cache restoration as well as
+    // after a scan. Loose settings can survive disabling a mod in MO2.
+    void ApplyLoadedPluginState(std::vector<HotkeyRecord>& records,
+        const std::function<bool(std::string_view)>& isLoaded);
+
     class ScanPipeline
     {
     public:

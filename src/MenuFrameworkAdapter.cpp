@@ -1,4 +1,5 @@
 #include "UHI/MenuFrameworkAdapter.h"
+#include "UHI/BindingHistory.h"
 #include "UHI/EscapeCloseGuard.h"
 #include "UHI/BindingSerializer.h"
 #include "UHI/Registry.h"
@@ -59,7 +60,8 @@ namespace
     {
         overview,
         category,
-        options
+        options,
+        backups
     };
 
     struct RegistrySnapshot
@@ -111,6 +113,7 @@ namespace
     std::atomic_bool g_openingHotkeyCaptureActive{ false };
     float g_uiScale = 1.0F;
     float g_windowOpacity = 0.90F;
+    bool g_readableTheme{};
     enum class EditorModal
     {
         none,
@@ -138,6 +141,8 @@ namespace
     std::string g_bindingCaptureDisplay;
     std::string g_bindingCaptureRaw;
     std::string g_bindingCaptureStatus;
+    std::optional<std::string> g_originalBackupValue;
+    std::vector<UHI::BindingChange> g_bindingHistory;
     std::atomic_bool g_bindingWritePending{ false };
     std::atomic_int g_bindingWriteResult{ 0 };  // 0 waiting/none, 1 success, 2 failure
     std::mutex g_bindingWriteResultMutex;
@@ -401,6 +406,7 @@ namespace
         std::scoped_lock lock(g_editorMutex);
         g_editorRecord = record;
         g_editorModal = EditorModal::binding;
+        g_originalBackupValue = UHI::OriginalBackupValue(record);
         g_modalInputActive = true;
         g_bindingCaptureActive = false;
         g_bindingCaptureDisplay = FriendlyBindingLabel(record.binding);
@@ -611,6 +617,7 @@ namespace
 
     ImVec4 CategoryTextColor(const UHI::HotkeyCategory category, const float alpha = 1.0F)
     {
+        if (g_readableTheme) return ImVec4(1.0F, 0.95F, 0.82F, alpha);
         switch (category) {
         case UHI::HotkeyCategory::game: return ImVec4(0.55F, 0.74F, 0.98F, alpha);
         case UHI::HotkeyCategory::environment: return ImVec4(0.38F, 0.92F, 0.67F, alpha);
@@ -821,10 +828,11 @@ namespace
             { ImGuiKey_LeftAlt, 0x38U }, { ImGuiKey_RightAlt, 0xB8U }
         };
         std::uint32_t keyboardModifier{};
+        unsigned modifierCount{};
         for (const auto& [key, code] : modifiers) {
             if (ImGui::IsKeyDown(key)) {
                 keyboardModifier = code;
-                break;
+                ++modifierCount;
             }
         }
         for (int value = ImGuiKey_NamedKey_BEGIN; value < ImGuiKey_GamepadStart; ++value) {
@@ -832,13 +840,13 @@ namespace
             const auto code = DirectInputFromImGuiKey(key);
             if (code && ImGui::IsKeyPressed(key, false)) {
                 return UHI::CaptureMenuFrameworkBindingInput("keyboard", *code,
-                    keyboardModifier == 0U ? "" : "keyboard", keyboardModifier);
+                    keyboardModifier == 0U ? "" : "keyboard", keyboardModifier, modifierCount > 1U);
             }
         }
         for (std::uint32_t code = 0; code < 5U; ++code) {
             if (ImGui::IsMouseClicked(static_cast<ImGuiMouseButton>(code), false)) {
                 return UHI::CaptureMenuFrameworkBindingInput("mouse", code,
-                    keyboardModifier == 0U ? "" : "keyboard", keyboardModifier);
+                    keyboardModifier == 0U ? "" : "keyboard", keyboardModifier, modifierCount > 1U);
             }
         }
         static constexpr std::pair<ImGuiKey, std::uint32_t> gamepadKeys[]{
@@ -1134,6 +1142,8 @@ namespace
         TooltipTextValue(UiText("Action", "기능", "功能"), DisplayAction(record));
         TooltipTextValue(UiText("Category", "카테고리", "类别"), CategoryLabel(entry.category));
         TooltipTextValue(UiText("Hotkey", "단축키", "快捷键"), FriendlyBindingLabel(entry.displayBinding));
+        if (record.uiLocalOnly) ImGui::TextUnformatted(UiText("Active inside the mod's interface only",
+            "해당 모드 화면 안에서 사용하는 키", "仅在此模组界面内生效"));
         if (!detailed) return;
 
         const auto* localizedDevice = LocalizedDeviceType(record.device);
@@ -1171,6 +1181,8 @@ namespace
             ImGui::Separator();
             ImGui::TextDisabled(UiText("+ %zu more", "+ %zu개 더 있음", "+ 另有 %zu 项"),
                 matches.size() - visibleCount);
+            ImGui::TextUnformatted(UiText("Right-click this key to browse every action.",
+                "키를 우클릭하면 모든 기능을 볼 수 있습니다.", "右键点击此键可浏览所有功能。"));
         }
         ImGui::EndTooltip();
     }
@@ -2407,7 +2419,8 @@ namespace
                 ImGui::TableSetColumnIndex(4);
                 ImGui::TextDisabled("%s", record.device.c_str());
                 ImGui::TableSetColumnIndex(5);
-                const auto context = LocalizedContextLabel(record.contextMask, true);
+                const auto context = record.uiLocalOnly ? std::string(UiText("Mod interface", "모드 화면 내부", "模组界面")) :
+                    LocalizedContextLabel(record.contextMask, true);
                 ImGui::TextUnformatted(context.c_str());
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("%s\n%s: %s", LocalizedContextLabel(record.contextMask).c_str(),
@@ -2492,6 +2505,8 @@ namespace
         if (g_openBindingContextPopup) ImGui::OpenPopup("##UHM_BINDING_CONTEXT");
         EditorModal contextRequest = EditorModal::none;
         std::optional<UHI::HotkeyRecord> contextRequestRecord;
+        ImGui::SetNextWindowSizeConstraints(ImVec2(320.0F * g_uiScale, 0.0F),
+            ImVec2(720.0F * g_uiScale, ImGui::GetIO().DisplaySize.y * 0.75F));
         const bool bindingContextVisible = ImGui::BeginPopup("##UHM_BINDING_CONTEXT");
         if (bindingContextVisible) {
             // Do not consume a popup request until ImGui confirms it is visible.
@@ -2505,6 +2520,28 @@ namespace
                 g_bindingHotspotBlockedUntilFrame = ImGui::GetFrameCount() + 2;
                 g_contextRecord.reset();
             } else if (g_contextRecord) {
+                // Keep this popup scrollable and retain every action on the
+                // physical key, including modifier variants. Selecting a row
+                // changes the editor target without closing the popup.
+                ImGui::TextUnformatted(UiText("Actions on this key", "이 키에 지정된 기능", "此键上的功能"));
+                const auto compactBinding = UHI::CompactBindingLabel(g_contextRecord->binding);
+                const std::string physical(PhysicalKey(compactBinding));
+                std::unordered_set<std::string> seen;
+                for (const auto& group : g_filteredGroups) {
+                    if (group.device != g_contextRecord->device) continue;
+                    for (const auto& entry : group.entries) {
+                        if (!entry.record || PhysicalKey(entry.displayBinding) != physical) continue;
+                        const auto identity = ActionIdentity(*entry.record);
+                        if (!seen.insert(identity).second) continue;
+                        ImGui::PushID(identity.c_str());
+                        const auto label = entry.record->owner + " - " + DisplayAction(*entry.record) +
+                            " (" + FriendlyBindingLabel(entry.displayBinding) + ")";
+                        if (ImGui::Selectable(label.c_str(), identity == ActionIdentity(*g_contextRecord),
+                                ImGuiSelectableFlags_DontClosePopups)) g_contextRecord = *entry.record;
+                        ImGui::PopID();
+                    }
+                }
+                ImGui::Separator();
                 const ImVec4 contextHeadingColor(0.68F, 0.72F, 0.78F, 1.0F);
                 ImGui::TextColored(contextHeadingColor, "%s", g_contextRecord->owner.c_str());
                 const auto contextAction = DisplayAction(*g_contextRecord);
@@ -2642,12 +2679,12 @@ namespace
         // The format description and two-line capture instructions can wrap
         // at 125-135% scale.  Keep the action buttons visible and leave a
         // deliberate lower margin instead of clipping the modal contents.
-        ImGui::SetNextWindowSize(ImVec2(880.0F * g_uiScale, 520.0F * g_uiScale), ImGuiCond_Appearing);
+        ImGui::SetNextWindowSize(ImVec2((std::min)(880.0F * g_uiScale, ImGui::GetIO().DisplaySize.x * 0.95F),
+            (std::min)(620.0F * g_uiScale, ImGui::GetIO().DisplaySize.y * 0.90F)), ImGuiCond_Appearing);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
             ImVec2(32.0F * g_uiScale, 28.0F * g_uiScale));
         ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
-        const bool bindingVisible = ImGui::BeginPopupModal(bindingPopupTitle.c_str(), &bindingOpen,
-            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        const bool bindingVisible = ImGui::BeginPopupModal(bindingPopupTitle.c_str(), &bindingOpen);
         ImGui::PopStyleColor();
         ImGui::PopStyleVar();
         if (bindingVisible) {
@@ -2705,6 +2742,25 @@ namespace
                     "Click the field, then press one input\nor one modifier plus an input.",
                     "필드를 누른 뒤 단일 입력 또는\n모디파이어 하나와 입력 하나를 누르세요.",
                     "点击输入框后，按一个输入，\n或一个修饰键加一个输入。"));
+                ImGui::BeginDisabled(g_bindingWritePending.load());
+                if (ImGui::Button(UiText("Unbind", "단축키 해제", "解除绑定"))) {
+                    const auto unbound = UHI::SerializeUnboundBinding(record);
+                    g_bindingCaptureActive = false;
+                    g_bindingCaptureStatus = unbound.error;
+                    g_bindingCaptureRaw = unbound.raw;
+                    g_bindingCaptureDisplay = unbound ? UiText("Unbound", "미지정", "未绑定") : "";
+                }
+                ImGui::SameLine();
+                ImGui::BeginDisabled(!g_originalBackupValue);
+                if (ImGui::Button(UiText("Restore original backup", "최초 백업 복원", "恢复初始备份"))) {
+                    g_bindingCaptureActive = false;
+                    g_bindingCaptureRaw = *g_originalBackupValue;
+                    g_bindingCaptureDisplay = std::string(UiText("Backup: ", "백업: ", "备份：")) + *g_originalBackupValue;
+                    g_bindingCaptureStatus = UiText("Save to restore only this setting from .uhi.bak.",
+                        "저장을 누르면 .uhi.bak에서 이 설정만 복원합니다.", "保存后将仅从 .uhi.bak 恢复此设置。");
+                }
+                ImGui::EndDisabled();
+                ImGui::EndDisabled();
                 if (!g_bindingCaptureStatus.empty()) {
                     const ImVec4 statusColor(1.0F, 0.64F, 0.35F, 1.0F);
                     RenderCenteredTextLines(g_bindingCaptureStatus, &statusColor);
@@ -3169,6 +3225,14 @@ namespace
                 g_page = HotkeyViewPage::options;
                 ImGui::EndTabItem();
             }
+            if (beginStyledTab(UiText("Backups", "백업", "备份"), UHI::HotkeyCategory::all,
+                    g_page == HotkeyViewPage::backups, true)) {
+                if (g_page != HotkeyViewPage::backups)
+                    g_bindingHistory = UHI::LoadBindingHistory(std::filesystem::current_path() /
+                        "Data/SKSE/Plugins/UniversalHotkeyManager/binding-history-v1.bin");
+                g_page = HotkeyViewPage::backups;
+                ImGui::EndTabItem();
+            }
             ImGui::EndTabBar();
         }
         ImGui::SetWindowFontScale(g_uiScale);
@@ -3281,6 +3345,7 @@ namespace
                 g_uiScale = std::clamp(g_openingHotkeyDraft.uiScale, 0.80F, 1.35F);
                 g_windowOpacity = std::clamp(g_openingHotkeyDraft.windowOpacity, 0.35F, 1.0F);
                 g_uiLanguage.store(g_openingHotkeyDraft.uiLanguage);
+                g_readableTheme = g_openingHotkeyDraft.readableTheme;
                 g_openingHotkeyDraftLoaded = true;
                 g_preferencesDirty = false;
             }
@@ -3449,6 +3514,15 @@ namespace
                         "전체 글자 크기와 UI 창 투명도를 조절하고 인터페이스 언어를 자동 또는 수동으로 선택합니다.",
                         "调整整体文字大小和界面窗口透明度，并自动或手动选择界面语言。"),
                     appearanceGroupHeight);
+                bool appearanceChanged = ImGui::Checkbox(UiText("Warm high-contrast text", "따뜻한 고대비 글자", "暖色高对比文字"),
+                    &preferencesDraft.readableTheme);
+                if (appearanceChanged) {
+                    std::scoped_lock lock(g_preferencesMutex);
+                    g_openingHotkeyDraft.readableTheme = preferencesDraft.readableTheme;
+                    g_readableTheme = preferencesDraft.readableTheme;
+                    g_preferencesDirty = true;
+                    UHI::NativeImGuiHost::SetAppearance(preferencesDraft.readableTheme);
+                }
                 float textSizePercent = g_uiScale * 100.0F;
                 const char* textSizeLabel = UiText("Text size",
                     "글자 크기", "文字大小");
@@ -3543,17 +3617,24 @@ namespace
                     const float retainedScale = g_uiScale;
                     const float retainedOpacity = g_windowOpacity;
                     const auto retainedLanguage = g_uiLanguage.load();
+                    const auto retainedTheme = g_openingHotkeyDraft.readableTheme;
                     g_openingHotkeyDraft = {};
+                    g_openingHotkeyDraft.readableTheme = retainedTheme;
                     g_openingHotkeyDraft.uiScale = retainedScale;
                     g_openingHotkeyDraft.windowOpacity = retainedOpacity;
                     g_openingHotkeyDraft.uiLanguage = retainedLanguage;
                     preferencesDraft = g_openingHotkeyDraft;
                     g_preferencesDirty = true;
                 }
-                ImGui::TextDisabled("%s", UiText(
-                    "Click the field, then press the desired key or modifier chord. Escape cancels capture. Changes save when the window closes.",
-                    "필드를 누른 뒤 원하는 키나 모디파이어 조합을 입력하세요. ESC는 입력을 취소하며, 창을 닫으면 자동 저장됩니다.",
-                    "点击输入框后按下所需按键或修饰键组合。ESC 可取消输入，关闭窗口时自动保存。"));
+                if (ImGui::Checkbox(UiText("Enable opening shortcut", "열기 단축키 사용", "启用打开快捷键"), &preferencesDraft.enabled)) {
+                    std::scoped_lock lock(g_preferencesMutex);
+                    g_openingHotkeyDraft.enabled = preferencesDraft.enabled;
+                    g_preferencesDirty = true;
+                }
+                ImGui::TextWrapped("%s", UiText(
+                    "If Delete is shared, choose another shortcut. When disabled, use an API launcher or set Enabled=true in UniversalHotkeyManager.ini. Changes save when the window closes.",
+                    "Delete가 겹치면 다른 단축키를 지정하세요. 해제 후에는 API 실행 메뉴 또는 INI의 Enabled=true로 다시 열 수 있습니다. 창을 닫으면 저장됩니다.",
+                    "Delete 冲突时请选择其他快捷键。禁用后可通过 API 菜单打开，或在 INI 中设置 Enabled=true。关闭窗口时保存。"));
 
                 ImGui::EndTable();
             }
@@ -3670,6 +3751,34 @@ namespace
             }
             RenderOverviewShortcutBadge(badgeHotkey);
         }
+        if (g_page == HotkeyViewPage::backups) {
+            ImGui::TextWrapped("%s", UiText(
+                "Select a previous value, then save to restore that binding. Changes made outside UHM are never overwritten automatically. For save-backed MCM values, load the intended save first.",
+                "이전 값을 선택하고 저장하면 해당 단축키를 복원합니다. 외부에서 변경한 값은 자동으로 덮어쓰지 않습니다. MCM 값은 먼저 대상 세이브를 불러오세요.",
+                "选择以前的值并保存以恢复该绑定。不会自动覆盖 UHM 外部的修改。MCM 值请先加载目标存档。"));
+            if (ImGui::Button(UiText("Refresh history", "내역 새로고침", "刷新历史")))
+                g_bindingHistory = UHI::LoadBindingHistory(std::filesystem::current_path() /
+                    "Data/SKSE/Plugins/UniversalHotkeyManager/binding-history-v1.bin");
+            ImGui::BeginChild("BindingHistoryList", ImVec2(0, 0));
+            for (std::size_t i = g_bindingHistory.size(); i-- > 0;) {
+                const auto& change = g_bindingHistory[i];
+                ImGui::PushID(static_cast<int>(i));
+                const auto label = change.before.owner + " - " + change.before.action +
+                    " : " + change.before.rawBinding + " -> " + change.after.rawBinding;
+                if (ImGui::Selectable(label.c_str())) {
+                    auto current = change.after;
+                    for (auto latest = g_bindingHistory.rbegin(); latest != g_bindingHistory.rend(); ++latest)
+                        if (UHI::SameBindingSource(latest->after, current)) { current = latest->after; break; }
+                    BeginBindingEdit(current);
+                    g_bindingCaptureRaw = change.before.rawBinding;
+                    g_bindingCaptureDisplay = change.before.binding;
+                    g_bindingCaptureStatus = UiText("Save to restore this previous value.",
+                        "저장을 누르면 선택한 이전 값으로 복원합니다.", "保存以恢复此以前的值。");
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndChild();
+        }
         RenderEditorPopups();
         // ImGui can observe Escape before Skyrim's input sink sees it. Close
         // the parent here as a reliable fallback, but only when no popup
@@ -3709,7 +3818,7 @@ namespace UHI
         snapshot->registry = std::move(registry);
         snapshot->restored = restored;
         if (snapshot->registry) {
-            snapshot->groups = BuildHotkeyView(*snapshot->registry);
+            snapshot->groups = BuildHotkeyView(*snapshot->registry, true);
             snapshot->conflictCount = snapshot->registry->Conflicts().size();
             snapshot->conditionalConflictCount = snapshot->registry->ConditionalConflictCount();
         }
@@ -3796,6 +3905,8 @@ namespace UHI
         if (!g_openingHotkeyDraftLoaded) return false;
         OpeningHotkey captured{
             .scanCode = scanCode,
+            .enabled = true,
+            .readableTheme = g_openingHotkeyDraft.readableTheme,
             .ctrl = ctrlScanCode != 0,
             .shift = shiftScanCode != 0,
             .alt = altScanCode != 0,
@@ -3847,14 +3958,15 @@ namespace UHI
 
     bool CaptureMenuFrameworkBindingInput(const std::string_view device,
         const std::uint32_t mainCode, const std::string_view modifierDevice,
-        const std::uint32_t modifierCode) noexcept
+        const std::uint32_t modifierCode, const bool multipleModifiers) noexcept
     {
         try {
             std::scoped_lock lock(g_editorMutex);
             if (!g_bindingCaptureActive.load() || g_editorModal != EditorModal::binding || !g_editorRecord)
                 return false;
-            const auto serialized = UHI::SerializeCapturedBinding(*g_editorRecord,
-                device, mainCode, modifierDevice, modifierCode);
+            const auto serialized = multipleModifiers ? UHI::SerializedBinding{ {}, {},
+                "This capture accepts one modifier at a time; no incomplete chord was saved." } :
+                UHI::SerializeCapturedBinding(*g_editorRecord, device, mainCode, modifierDevice, modifierCode);
             if (!serialized.error.empty()) {
                 g_bindingCaptureStatus = serialized.error;
                 g_bindingCaptureDisplay.clear();

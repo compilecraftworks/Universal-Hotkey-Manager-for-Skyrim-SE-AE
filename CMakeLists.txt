@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(UniversalHotkeyManager VERSION 1.0.6 LANGUAGES CXX)
+project(UniversalHotkeyManager VERSION 1.0.7 LANGUAGES CXX)
 
 find_package(ZLIB REQUIRED)
 find_package(lz4 CONFIG REQUIRED)
@@ -21,6 +21,7 @@ endif()
 
 add_library(uhi_core STATIC
     src/BindingSerializer.cpp
+    src/BindingHistory.cpp
     src/ConfigBindingParser.cpp
     src/TextDecoder.cpp
     src/InputCodeFormatter.cpp
@@ -72,6 +73,11 @@ if(UHI_BUILD_SKSE)
     endif()
     find_package(CommonLibSSE CONFIG REQUIRED)
     find_package(imgui CONFIG REQUIRED)
+    if(UHI_BUILD_TESTS)
+        add_executable(uhi_native_font_tests tests/NativeFontAtlasTests.cpp)
+        target_include_directories(uhi_native_font_tests PRIVATE include)
+        target_link_libraries(uhi_native_font_tests PRIVATE imgui::imgui User32 Gdi32)
+    endif()
     add_commonlibsse_plugin(UniversalHotkeyManager
         NAME "Universal Hotkey Manager for Skyrim SE-AE"
         AUTHOR "UHI contributors"
@@ -86,7 +92,7 @@ if(UHI_BUILD_SKSE)
     )
     target_link_libraries(UniversalHotkeyManager PRIVATE uhi_core imgui::imgui)
     if(WIN32)
-        target_link_libraries(UniversalHotkeyManager PRIVATE d3d11 dxgi windowscodecs Ole32)
+        target_link_libraries(UniversalHotkeyManager PRIVATE d3d11 dxgi windowscodecs Ole32 User32 Gdi32)
     endif()
     target_include_directories(UniversalHotkeyManager PRIVATE include)
     target_compile_definitions(UniversalHotkeyManager PRIVATE UHI_VERSION="${PROJECT_VERSION}")
@@ -96,6 +102,12 @@ endif()
 
 if(UHI_BUILD_TESTS)
     enable_testing()
+    if(TARGET uhi_native_font_tests)
+        add_test(NAME uhi_native_font_tests COMMAND uhi_native_font_tests)
+    endif()
+    add_executable(uhi_forum_regression_tests tests/ForumRegressionTests.cpp)
+    target_link_libraries(uhi_forum_regression_tests PRIVATE uhi_core)
+    add_test(NAME uhi_forum_regression_tests COMMAND uhi_forum_regression_tests)
     if(WIN32)
         # Compile the public GetProcAddress consumer example on every test
         # build so the shipped declarations cannot silently drift.

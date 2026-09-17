@@ -197,7 +197,11 @@ namespace UHI
                 if (separator == std::string::npos) continue;
                 const auto name = Lower(Trim(line.substr(0, separator)));
                 const auto value = Trim(line.substr(separator + 1));
-                if (name == "togglekey") {
+                if (name == "enabled") {
+                    if (const auto parsed = Boolean(value)) result.enabled = *parsed;
+                } else if (name == "readabletheme") {
+                    if (const auto parsed = Boolean(value)) result.readableTheme = *parsed;
+                } else if (name == "togglekey") {
                     if (const auto parsed = Number(value)) result.scanCode = *parsed;
                 } else if (name == "ctrl") {
                     if (const auto parsed = Boolean(value)) result.ctrl = *parsed;
@@ -247,6 +251,8 @@ namespace UHI
                    << ";                       LAlt=0x38, RAlt=0xB8.\n"
                    << "[General]\nToggleKey=0x" << std::hex << std::uppercase << hotkey.scanCode << std::dec
                    << "\nCtrl=" << (hotkey.ctrl ? "true" : "false")
+                   << "\nEnabled=" << (hotkey.enabled ? "true" : "false")
+                   << "\nReadableTheme=" << (hotkey.readableTheme ? "true" : "false")
                    << "\nShift=" << (hotkey.shift ? "true" : "false")
                    << "\nAlt=" << (hotkey.alt ? "true" : "false")
                    << "\nCtrlKey=0x" << std::hex << hotkey.ctrlScanCode

@@ -85,7 +85,8 @@ namespace
 namespace UHI::Writers
 {
     bool ControlMapWriter::SetBinding(const std::filesystem::path& path,
-        const std::size_t lineNumber, const std::string& device, const std::string& newBinding) const
+        const std::size_t lineNumber, const std::string& device, const std::string& newBinding,
+        const std::string& expectedAction, const std::string& expectedRaw) const
     {
         if (lineNumber == 0 || !std::filesystem::exists(path)) {
             return false;
@@ -118,6 +119,9 @@ namespace UHI::Writers
         std::smatch match;
         if (!std::regex_match(line, match, row)) return false;
         const auto group = 2 + deviceIndex;
+        if ((!expectedAction.empty() && Trim(match[1].str()) != expectedAction) ||
+            (!expectedRaw.empty() && NormalizeControlMapBinding(match[group].str(), device) !=
+                NormalizeControlMapBinding(expectedRaw, device))) return false;
         line.replace(static_cast<std::size_t>(match.position(group)),
             static_cast<std::size_t>(match.length(group)), *normalized);
 

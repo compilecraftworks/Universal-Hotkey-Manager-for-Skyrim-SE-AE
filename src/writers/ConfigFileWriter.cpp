@@ -63,7 +63,7 @@ namespace
 
     bool ReplaceValue(std::string& content, const std::size_t lineNumber,
         const std::string_view settingName, const std::string_view expectedRaw,
-        const std::string_view newRaw, const bool jsonSyntax)
+        const std::string_view newRaw, const bool jsonSyntax, std::string* readValue = nullptr)
     {
         if (lineNumber == 0 || settingName.empty()) return false;
         std::size_t lineStart{};
@@ -129,6 +129,13 @@ namespace
                 while (valueEnd > valueStart &&
                     std::isspace(static_cast<unsigned char>(content[valueEnd - 1U]))) --valueEnd;
             }
+            if (readValue) {
+                // Refuse an ambiguous one-line object with repeated names.
+                if (content.find(std::string("\"") + std::string(settingName) + "\"", nameEnd) < lineEnd)
+                    return false;
+                *readValue = Trim(std::string_view(content).substr(valueStart, valueEnd - valueStart));
+                return true;
+            }
             if (Trim(std::string_view(content).substr(valueStart, valueEnd - valueStart)) != Trim(expectedRaw)) {
                 namePosition = nameEnd;
                 continue;
@@ -142,6 +149,23 @@ namespace
 
 namespace UHI::Writers
 {
+    std::optional<std::string> ConfigFileWriter::ReadBinding(const std::filesystem::path& path,
+        const std::size_t lineNumber, const std::string_view settingName) const
+    {
+        std::error_code error;
+        if (!std::filesystem::is_regular_file(path, error) || error ||
+            std::filesystem::file_size(path, error) > 16U * 1024U * 1024U || error) return std::nullopt;
+        std::ifstream input(path, std::ios::binary);
+        if (!input) return std::nullopt;
+        std::string content((std::istreambuf_iterator<char>(input)), {}), result;
+        auto syntaxPath = path;
+        if (syntaxPath.extension() == ".bak") { syntaxPath.replace_extension(); syntaxPath.replace_extension(); }
+        auto extension = syntaxPath.extension().string();
+        std::ranges::transform(extension, extension.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (content.find('\0') != std::string::npos || !ReplaceValue(content, lineNumber, settingName,
+                {}, {}, extension == ".json" || extension == ".jsonc", &result)) return std::nullopt;
+        return ValidReplacement(result) ? std::optional<std::string>(result) : std::nullopt;
+    }
     bool ConfigFileWriter::SetBinding(const std::filesystem::path& path,
         const std::size_t lineNumber, const std::string_view settingName,
         const std::string_view expectedRaw, const std::string_view newRaw) const

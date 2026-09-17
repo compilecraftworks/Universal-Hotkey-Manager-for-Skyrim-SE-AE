@@ -32,7 +32,7 @@ namespace UHI
     bool IsMenuFrameworkBindingCaptureActive() noexcept;
     bool CaptureMenuFrameworkBindingInput(std::string_view device,
         std::uint32_t mainCode, std::string_view modifierDevice,
-        std::uint32_t modifierCode) noexcept;
+        std::uint32_t modifierCode, bool multipleModifiers = false) noexcept;
     void CancelMenuFrameworkBindingCapture() noexcept;
     void CancelMenuFrameworkEditorModal() noexcept;
     void SetMenuFrameworkScanStatus(bool running, float percent, float currentFilePercent,

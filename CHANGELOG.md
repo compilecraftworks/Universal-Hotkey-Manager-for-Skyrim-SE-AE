@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.7 - 2026-09-18
+
+- Process complete input batches during capture; preserve left/right modifiers and keyboard modifiers with mouse input. Disabled/unready UHM shortcuts no longer stop other input sinks. Forward popup mouse input and wheel scrolling while UHM owns the modal.
+- Browse every action assigned to a key in its scrollable right-click menu. Include mod-interface bindings with a scope label, without counting them as gameplay conflicts. Show the read-only Console launcher.
+- Use the current Windows UI font, with Windows-installed Malgun Gothic for Korean and Microsoft YaHei/JhengHei for Chinese. No font files are bundled. Add optional warm high-contrast text, preserving the previous colors by default.
+- Add Unbind for verified SKSE/MCM, controlmap, ReShade tuple and Community Shaders formats. Scalar settings reject chords they cannot store; unsupported disable conventions remain guarded.
+- Add original per-setting `.uhi.bak` restoration and a Backups tab for the latest 256 UHM changes, including unbound actions. Restore verifies the expected current value and preserves unrelated settings. Save-backed MCM edits still require a game save.
+- Detect dedicated hotkey documents and nested JSON/YAML binding sections, integral numeric MCM exports, and owner-prefixed live properties used behind custom getters. Dedicated native key documents can use matching PE import evidence instead of the general SKSE code-space fallback.
+- Recheck Community Shaders DLL activation after scans and snapshot restoration. Invalidate old scan caches, reject unverified future runtime layouts, preserve later plugins' window-procedure chains after renderer failure, and add startup diagnostics.
+- Built for SE/AE only. Forum reports involving OAR/Heart of Magic were withdrawn by their reporter; no causal fix for those unconfirmed symptoms is claimed. In-game compatibility validation is still required.
+
 ## 1.0.6 - 2026-08-28
 
 - Limited the native font atlas to the supported English, Korean, and Simplified Chinese UI ranges, removed the unused Japanese glyph range, and added a D3D11 font-texture preflight so an unsupported atlas fails closed instead of crashing on the first menu frame.
@@ -13,6 +24,10 @@
 - Added anonymous regression fixtures for representative navigation, scene-start, furniture, widget, staged-flow, and native-MCM layouts without adding any mod-name-specific detection rules.
 - Added an external C API for opening and closing UHM, querying menu visibility, and disabling only UHM's native opening hotkey, with a bundled consumer header and `GetProcAddress` example.
 - Refined the native UI with neutral-grey action and popup buttons, subtly framed inputs, sliders, and progress bars, and a white separator below the category tabs while preserving category colors in tabs and device maps.
+- Fixed mouse-wheel scrolling in the native manager tables by routing game input-sink, menu, and window-procedure wheel events into a single ImGui wheel update per frame.
+- Removed the numeric range text from the Options text-size and window-opacity labels; the accepted 80-135% and 35-100% limits are unchanged.
+- Enlarged the restored-scan notice, gave it a neutral border, and started its auto-close timer only once the popup is actually visible.
+- Removed the duplicate thin line under the category tabs, leaving the single white separator.
 
 ## 1.0.5 - 2026-08-26
 

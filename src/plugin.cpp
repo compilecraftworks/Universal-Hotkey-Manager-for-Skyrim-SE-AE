@@ -1,3 +1,6 @@
+#include "UHI/BindingInputCapture.h"
+#include "UHI/BindingHistory.h"
+#include "UHI/McmBindingMatch.h"
 #include "UHI/JsonReporter.h"
 #include "UHI/Registry.h"
 #include "UHI/ScanPipeline.h"
@@ -105,12 +108,16 @@ namespace
             (hotkey.shift ? 1U << 9U : 0U) | (hotkey.alt ? 1U << 10U : 0U) |
             (EncodeModifierSide(hotkey.ctrlScanCode, 0x1D, 0x9D) << 11U) |
             (EncodeModifierSide(hotkey.shiftScanCode, 0x2A, 0x36) << 13U) |
-            (EncodeModifierSide(hotkey.altScanCode, 0x38, 0xB8) << 15U);
+            (EncodeModifierSide(hotkey.altScanCode, 0x38, 0xB8) << 15U) |
+            (!hotkey.enabled ? 1U << 17U : 0U) |
+            (hotkey.readableTheme ? 1U << 18U : 0U);
     }
 
     constexpr UHI::OpeningHotkey UnpackOpeningHotkey(const std::uint32_t packed) noexcept
     {
-        return { .scanCode = packed & 0xFFU, .ctrl = (packed & (1U << 8U)) != 0,
+        return { .scanCode = packed & 0xFFU, .enabled = (packed & (1U << 17U)) == 0,
+            .readableTheme = (packed & (1U << 18U)) != 0,
+            .ctrl = (packed & (1U << 8U)) != 0,
             .shift = (packed & (1U << 9U)) != 0, .alt = (packed & (1U << 10U)) != 0,
             .ctrlScanCode = DecodeModifierSide((packed >> 11U) & 0x3U, 0x1D, 0x9D),
             .shiftScanCode = DecodeModifierSide((packed >> 13U) & 0x3U, 0x2A, 0x36),
@@ -197,7 +204,7 @@ namespace
         std::ranges::transform(value, value.begin(), [](const unsigned char ch) {
             return static_cast<char>(std::tolower(ch));
         });
-        return value.find("console") != std::string::npos ||
+        return (value.find("console") != std::string::npos && value != "console" && value != "consolekey") ||
             value.find("debug") != std::string::npos ||
             value.find("creation") != std::string::npos ||
             value.find("marketplace") != std::string::npos;
@@ -375,7 +382,7 @@ namespace
     bool RestorePreviousScan()
     {
         const auto path = LastScanPath();
-        const auto records = UHI::LastScanStore{}.Load(path);
+        auto records = UHI::LastScanStore{}.Load(path);
         if (!records) {
             std::error_code error;
             if (std::filesystem::exists(path, error) && !error) {
@@ -394,6 +401,9 @@ namespace
             return false;
         }
         auto mutableRegistry = std::make_shared<UHI::Registry>();
+        UHI::ApplyLoadedPluginState(*records, [](const std::string_view module) {
+            return GetModuleHandleA(std::string(module).c_str()) != nullptr;
+        });
         for (auto record : *records) mutableRegistry->Add(std::move(record));
         const bool hasControlMap = std::ranges::any_of(mutableRegistry->Records(), [](const auto& record) {
             return record.detector == "ControlMapScanner";
@@ -443,7 +453,7 @@ namespace
 
     bool ToggleOpeningWindow(const std::string_view source)
     {
-        if (!UHI::RuntimeAPI::IsNativeHotkeyEnabled()) return false;
+        if (!GetOpeningHotkey().enabled || !UHI::RuntimeAPI::IsNativeHotkeyEnabled()) return false;
 
         // Editor modals and the opening-shortcut capture own all input until
         // they finish. In particular, the currently configured key must not
@@ -463,7 +473,7 @@ namespace
         const auto hotkey = GetOpeningHotkey();
         const std::string sourceText(source);
         const auto completeToggle = [hotkey, sourceText] {
-            if (!UHI::RuntimeAPI::IsNativeHotkeyEnabled()) {
+            if (!GetOpeningHotkey().enabled || !UHI::RuntimeAPI::IsNativeHotkeyEnabled()) {
                 g_openingTogglePending = false;
                 return;
             }
@@ -801,6 +811,7 @@ namespace
         record.device = parsed.device;
         record.detector = "PapyrusRuntimeProperty";
         record.settingSection = value.settingSection;
+        record.settingName = value.settingName;
         record.confidence = UHI::Confidence::confirmed;
         record.stage = UHI::ScanStage::runtime;
         // This is an exact integer property on an already-registered SkyUI
@@ -1050,6 +1061,13 @@ namespace
                 return false;
             }
             auto& target = targets.front();
+            if (record.detector == "PapyrusRuntimeProperty") {
+                const auto expected = ParseSingleMcmKeyCode(record.rawBinding);
+                if (!expected || target.oldValue != *expected) {
+                    detail = "This MCM binding changed since it was displayed. Rescan before editing.";
+                    return false;
+                }
+            }
             const auto section = CanonicalMcmIdentifier(record.settingSection);
             bool dispatched{};
             if (section.contains("addkeymapoptionst") || section.contains("keymapoptionst")) {
@@ -1302,11 +1320,12 @@ namespace
             for (const auto& value : liveValues) {
                 const bool scriptMatches = CanonicalMcmIdentifier(value.scriptName) == script;
                 const auto liveSection = CanonicalMcmIdentifier(value.settingSection);
-                if (!section.empty() && !liveSection.empty() && section != liveSection) continue;
+                if (!section.empty() && !liveSection.empty() && section != liveSection && liveSection != "tesglobal") continue;
                 const auto liveSetting = CanonicalMcmIdentifier(value.settingName);
                 const auto liveStem = McmSettingStem(value.settingName);
                 int score{};
                 if (scriptMatches && liveSetting == setting) score = 100;
+                else if (scriptMatches && UHI::MatchesOwnerPrefixedSetting(setting, liveSetting, value.modName)) score = 95;
                 else if (scriptMatches && !settingStem.empty() && liveStem == settingStem) score = 90;
                 else if (scriptMatches && settingStem.size() >= 6 && liveStem.contains(settingStem)) score = 70;
                 else if (scriptMatches && liveStem.size() >= 6 && settingStem.contains(liveStem)) score = 65;
@@ -1409,6 +1428,11 @@ namespace
     std::optional<UHI::SerializedBinding> SerializeMcmKeyForLinkedDocument(
         const UHI::HotkeyRecord& document, const std::int32_t keyCode)
     {
+        if (keyCode == -1) {
+            auto serialized = UHI::SerializeUnboundBinding(document);
+            if (serialized) return serialized;
+            return std::nullopt;
+        }
         if (keyCode < 0 || keyCode >= 282) return std::nullopt;
         std::string_view device;
         std::uint32_t capturedCode{};
@@ -1702,6 +1726,9 @@ namespace
                         records.insert(records.end(), std::make_move_iterator(activeRecords.begin()),
                             std::make_move_iterator(activeRecords.end()));
                     }
+                    UHI::ApplyLoadedPluginState(records, [](const std::string_view module) {
+                        return GetModuleHandleA(std::string(module).c_str()) != nullptr;
+                    });
                     EnrichPersistedMcmHotkeys(records);
                     ResolveRegisteredMcmHotkeys(records, runtimeMcmValues);
                     OverlayRuntimeGameControls(records, std::move(runtimeGameControls));
@@ -1903,7 +1930,8 @@ namespace
                     }
                 } else if (record.detector == "ControlMapScanner") {
                     sourceWritten = UHI::Writers::ControlMapWriter{}.SetBinding(
-                        record.evidencePath, record.evidenceLine, record.device, newRaw);
+                        record.evidencePath, record.evidenceLine, record.device, newRaw,
+                        record.action, record.rawBinding);
                 } else {
                     sourceWritten = UHI::Writers::ConfigFileWriter{}.SetBinding(record.evidencePath,
                         record.evidenceLine, record.settingName, record.rawBinding, newRaw);
@@ -1932,6 +1960,8 @@ namespace
                         "The source changed or its exact setting could not be written. No value was changed.");
                     return;
                 }
+                if (!UHI::SaveBindingChange(LastScanPath().parent_path() / "binding-history-v1.bin", record, newRaw))
+                    SKSE::log::warn("Could not save binding history; this change will not appear in the Backups tab");
                 if (completion) completion(true, detail.empty() ?
                     "The hotkey was saved in its original format." : detail);
                 // Papyrus remap handlers are queued by the VM. Give them a
@@ -2037,6 +2067,11 @@ namespace
             const bool installed = UHI::NativeImGuiHost::InstallRendererHook();
             SKSE::log::info("UHM native renderer hook {}",
                 installed ? "installed" : "was not installed; opening hotkey will fail closed");
+            RestorePreviousScan(); // All SKSE DLLs are now loaded; refresh activation evidence.
+            SKSE::log::info("UHM startup: runtime={}, rendererReady={}, shortcut={}, shortcutEnabled={}, CommunityShadersLoaded={}",
+                REL::Module::get().version().string(), UHI::NativeImGuiHost::IsReady(),
+                UHI::FormatOpeningHotkey(GetOpeningHotkey()), GetOpeningHotkey().enabled,
+                GetModuleHandleW(L"CommunityShaders.dll") != nullptr);
         }
         if (message->type == SKSE::MessagingInterface::kPreLoadGame ||
             message->type == SKSE::MessagingInterface::kDeleteGame) {
@@ -2115,6 +2150,8 @@ namespace
         RE::BSEventNotifyControl ProcessEvent(RE::InputEvent* const* events,
             RE::BSTEventSource<RE::InputEvent*>*) override
         {
+            bool consumed = false;
+            bool openingCaptureHandled = false;
             for (auto event = events ? *events : nullptr; event; event = event->next) {
                 const auto button = event->AsButtonEvent();
                 if (!button) continue;
@@ -2135,16 +2172,29 @@ namespace
                 updateModifier(0x36, rightShiftDown_);
                 updateModifier(0x38, leftAltDown_);
                 updateModifier(0xB8, rightAltDown_);
+                if (button->device == RE::INPUT_DEVICE::kKeyboard)
+                    bindingCapture_.ObserveKeyboard(button->idCode, button->IsPressed());
 
                 if (button->device == RE::INPUT_DEVICE::kKeyboard &&
                     button->idCode == 0x01 && button->IsUp()) {
                     UHI::ReleaseMenuFrameworkEscapeCloseSuppression();
                 }
 
+                if (openingCaptureHandled) continue;
+
                 // Modal state is authoritative. The render frame can publish a
                 // popup one frame before its visible state is observed here, so
                 // gating capture on both flags would drop the first real input.
                 if (UHI::IsMenuFrameworkModalInputActive()) {
+                    // Popup input is consumed before MenuControls can send
+                    // Scaleform mouse events. Forward those events ourselves.
+                    if (button->device == RE::INPUT_DEVICE::kMouse) {
+                        if (button->idCode < 5U && (button->IsDown() || button->IsUp()))
+                            UHI::NativeImGuiHost::SubmitModalMouseButton(button->idCode, button->IsPressed());
+                        if (!UHI::IsMenuFrameworkBindingCaptureActive() && button->IsPressed() &&
+                            !button->IsRepeating() && (button->idCode == 8U || button->idCode == 9U))
+                            UHI::NativeImGuiHost::SubmitMouseWheel(button->idCode == 8U ? 1.0F : -1.0F);
+                    }
                     if (button->device == RE::INPUT_DEVICE::kKeyboard &&
                         button->idCode == 0x01 && button->IsDown()) {
                         // One Escape press owns exactly one close operation.
@@ -2154,60 +2204,28 @@ namespace
                         // editor modal and consume this event here.
                         UHI::CancelMenuFrameworkEditorModal();
                         ResetModalModifiers();
-                        return RE::BSEventNotifyControl::kStop;
+                        openingCaptureHandled = true;
+                        consumed = true; continue;
                     }
 
                     if (UHI::IsMenuFrameworkBindingCaptureActive()) {
-                        const auto keyboardModifier = button->device == RE::INPUT_DEVICE::kKeyboard &&
-                            (button->idCode == 0x1D || button->idCode == 0x9D ||
-                             button->idCode == 0x2A || button->idCode == 0x36 ||
-                             button->idCode == 0x38 || button->idCode == 0xB8);
-                        if (button->device == RE::INPUT_DEVICE::kKeyboard) {
-                            if (!keyboardModifier && button->IsDown()) {
-                                const auto modifier = leftCtrlDown_ ? 0x1DU : rightCtrlDown_ ? 0x9DU :
-                                    leftShiftDown_ ? 0x2AU : rightShiftDown_ ? 0x36U :
-                                    leftAltDown_ ? 0x38U : rightAltDown_ ? 0xB8U : 0U;
-                                UHI::CaptureMenuFrameworkBindingInput("keyboard", button->idCode,
-                                    modifier == 0U ? "" : "keyboard", modifier);
-                            } else if (keyboardModifier && button->IsUp()) {
-                                UHI::CaptureMenuFrameworkBindingInput("keyboard", button->idCode, "", 0U);
-                            }
-                        } else if (button->device == RE::INPUT_DEVICE::kMouse) {
-                            const bool candidateModifier = button->idCode == 3U || button->idCode == 4U;
-                            if (button->IsDown()) {
-                                if (candidateModifier && mouseModifier_ == 0U) {
-                                    mouseModifier_ = button->idCode + 1U;
-                                } else {
-                                    const auto modifier = mouseModifier_ == 0U ? 0U : mouseModifier_ - 1U;
-                                    UHI::CaptureMenuFrameworkBindingInput("mouse", button->idCode,
-                                        modifier == 0U ? "" : "mouse", modifier);
-                                    mouseModifier_ = 0U;
-                                }
-                            } else if (button->IsUp() && mouseModifier_ == button->idCode + 1U) {
-                                UHI::CaptureMenuFrameworkBindingInput("mouse", button->idCode, "", 0U);
-                                mouseModifier_ = 0U;
-                            }
-                        } else if (button->device == RE::INPUT_DEVICE::kGamepad) {
-                            const auto normalized = SKSE::InputMap::GamepadMaskToKeycode(button->idCode);
-                            const bool candidateModifier = normalized == 271U || normalized == 274U ||
-                                normalized == 275U || normalized == 280U || normalized == 281U;
-                            if (button->IsDown()) {
-                                if (candidateModifier && gamepadModifier_ == 0U) {
-                                    gamepadModifier_ = normalized;
-                                } else {
-                                    UHI::CaptureMenuFrameworkBindingInput("gamepad", normalized,
-                                        gamepadModifier_ == 0U ? "" : "gamepad", gamepadModifier_);
-                                    gamepadModifier_ = 0U;
-                                }
-                            } else if (button->IsUp() && gamepadModifier_ == normalized) {
-                                UHI::CaptureMenuFrameworkBindingInput("gamepad", normalized, "", 0U);
-                                gamepadModifier_ = 0U;
-                            }
+                        const std::string_view device = button->device == RE::INPUT_DEVICE::kKeyboard ? "keyboard" :
+                            button->device == RE::INPUT_DEVICE::kMouse ? "mouse" :
+                            button->device == RE::INPUT_DEVICE::kGamepad ? "gamepad" : "";
+                        const auto code = device == "gamepad" ?
+                            SKSE::InputMap::GamepadMaskToKeycode(button->idCode) : button->idCode;
+                        if (const auto captured = bindingCapture_.Process(device, code,
+                                button->IsDown() || (device == "mouse" && code >= 8U &&
+                                    button->IsPressed() && !button->IsRepeating()), button->IsUp())) {
+                            UHI::CaptureMenuFrameworkBindingInput(captured->device, captured->code,
+                                captured->modifierDevice, captured->modifier, captured->multipleModifiers);
                         }
+                    } else {
+                        ResetModalModifiers();
                     }
-                    return RE::BSEventNotifyControl::kStop;
+                    consumed = true;
+                    continue;
                 }
-
                 const bool windowOpen = UHI::IsMenuFrameworkWindowOpen();
                 if (windowOpen && button->device == RE::INPUT_DEVICE::kMouse &&
                     button->IsPressed() && !button->IsRepeating() &&
@@ -2219,7 +2237,7 @@ namespace
                     // events are transient presses; unlike regular buttons,
                     // some input stacks do not report them as IsDown().
                     UHI::NativeImGuiHost::SubmitMouseWheel(button->idCode == 8U ? 1.0F : -1.0F);
-                    return RE::BSEventNotifyControl::kStop;
+                    consumed = true; continue;
                 }
                 if (button->device != RE::INPUT_DEVICE::kKeyboard) {
                     // Let Skyrim's MenuControls sink translate ordinary mouse
@@ -2235,7 +2253,8 @@ namespace
                     UHI::IsMenuFrameworkOpeningHotkeyCaptureActive()) {
                     if (button->idCode == 0x01 && button->IsDown()) {
                         UHI::CancelMenuFrameworkOpeningHotkeyCapture();
-                        return RE::BSEventNotifyControl::kStop;
+                        openingCaptureHandled = true;
+                        consumed = true; continue;
                     }
                     const bool modifier = button->idCode == 0x1D || button->idCode == 0x9D ||
                         button->idCode == 0x2A || button->idCode == 0x36 ||
@@ -2246,8 +2265,9 @@ namespace
                         const auto altCode = leftAltDown_ ? 0x38U : rightAltDown_ ? 0xB8U : 0U;
                         UHI::CaptureMenuFrameworkOpeningHotkey(button->idCode,
                             ctrlCode, shiftCode, altCode);
+                        openingCaptureHandled = true;
                     }
-                    return RE::BSEventNotifyControl::kStop;
+                    consumed = true; continue;
                 }
 
                 // Escape belongs to UHM while its window is open. Close only
@@ -2255,14 +2275,13 @@ namespace
                 // system menu underneath it.
                 if (button->idCode == 0x01 && button->IsDown() &&
                     windowOpen) {
-                    if (UHI::IsMenuFrameworkEscapeCloseSuppressed())
-                        return RE::BSEventNotifyControl::kStop;
+                    if (UHI::IsMenuFrameworkEscapeCloseSuppressed()) { consumed = true; continue; }
                     UHI::CloseMenuFrameworkWindow();
-                    return RE::BSEventNotifyControl::kStop;
+                    consumed = true; continue;
                 }
 
                 const auto openingHotkey = GetOpeningHotkey();
-                if (button->idCode == openingHotkey.scanCode && button->IsDown() &&
+                if (openingHotkey.enabled && UHI::RuntimeAPI::IsNativeHotkeyEnabled() && UHI::NativeImGuiHost::IsReady() && button->idCode == openingHotkey.scanCode && button->IsDown() &&
                     ModifierMatches(openingHotkey.ctrl, openingHotkey.ctrlScanCode,
                         leftCtrlDown_, rightCtrlDown_) &&
                     ModifierMatches(openingHotkey.shift, openingHotkey.shiftScanCode,
@@ -2273,7 +2292,7 @@ namespace
                     // Do not leak the UHM toggle press into Skyrim or another
                     // input sink.  That could open a game menu or let a
                     // second handler claim focus in the same frame.
-                    return RE::BSEventNotifyControl::kStop;
+                    consumed = true; continue;
                 }
 
                 // Ordinary keys must likewise reach MenuControls so the native
@@ -2281,14 +2300,13 @@ namespace
                 // opening shortcut, and Escape were handled and consumed
                 // above; the menu's modal context blocks gameplay commands.
             }
-            return RE::BSEventNotifyControl::kContinue;
+            return consumed ? RE::BSEventNotifyControl::kStop : RE::BSEventNotifyControl::kContinue;
         }
 
     private:
         void ResetModalModifiers() noexcept
         {
-            mouseModifier_ = 0U;
-            gamepadModifier_ = 0U;
+            bindingCapture_.ResetCandidates();
         }
 
         bool leftCtrlDown_{ false };
@@ -2297,8 +2315,7 @@ namespace
         bool rightShiftDown_{ false };
         bool leftAltDown_{ false };
         bool rightAltDown_{ false };
-        std::uint32_t mouseModifier_{};
-        std::uint32_t gamepadModifier_{};
+        UHI::BindingInputCapture bindingCapture_;
     };
 
     InputSink g_inputSink;

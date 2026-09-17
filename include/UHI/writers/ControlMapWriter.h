@@ -14,6 +14,7 @@ namespace UHI::Writers
         // and hex input are validated and saved as canonical hexadecimal.
         [[nodiscard]] bool SetBinding(const std::filesystem::path& path,
             std::size_t lineNumber, const std::string& device,
-            const std::string& newBinding) const;
+            const std::string& newBinding, const std::string& expectedAction = {},
+            const std::string& expectedRaw = {}) const;
     };
 }

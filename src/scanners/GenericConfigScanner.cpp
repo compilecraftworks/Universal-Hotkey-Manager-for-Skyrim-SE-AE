@@ -5,6 +5,8 @@
 #include "UHI/ScanWorker.h"
 #include "UHI/ActivationContextInference.h"
 #include "UHI/PathEncoding.h"
+#include "UHI/ConfigBindingScope.h"
+#include "UHI/scanners/PeInputAnalyzer.h"
 
 #include <algorithm>
 #include <array>
@@ -875,7 +877,27 @@ namespace UHI::Scanners
         };
 
         std::vector<HotkeyRecord> results;
-        if (!MayContainBinding(utf8Content)) return results;
+        const bool dedicatedFile = IsDedicatedBindingName(UHI::PathToUtf8(source.stem()));
+        if (!dedicatedFile && !MayContainBinding(utf8Content)) return results;
+        const auto extension = Lower(UHI::PathToUtf8(source.extension()));
+        const ConfigBindingScope scopes(utf8Content, extension == ".yaml" || extension == ".yml");
+        auto documentCodeSpace = InferContextCodeSpace(utf8Content.substr(0, 4096));
+        // A dedicated native hotkey document can use Windows VK even under
+        // Data/SKSE. Require a matching owner DLL and real PE import evidence;
+        // never identify a particular mod by name or load its DLL to inspect it.
+        bool nativeWindowsInput = false;
+        if (dedicatedFile && documentCodeSpace == NumericCodeSpace::unknown) {
+            auto directory = source.parent_path();
+            for (unsigned depth = 0; depth < 4 && !directory.empty(); ++depth) {
+                auto module = directory.parent_path() / directory.filename();
+                module += ".dll";
+                std::error_code error;
+                if (std::filesystem::is_regular_file(module, error) && !error &&
+                    PeInputAnalyzer{}.ImportsWindowsKeyInput(module)) { nativeWindowsInput = true; break; }
+                directory = directory.parent_path();
+            }
+        }
+        if (nativeWindowsInput) documentCodeSpace = NumericCodeSpace::windowsVirtualKey;
         const std::string content(utf8Content);
         const std::string owner = [&] {
             if (auto embedded = EmbeddedOwner(utf8Content); !embedded.empty()) return embedded;
@@ -889,13 +911,17 @@ namespace UHI::Scanners
                              const std::vector<std::string>* compoundModifiers = nullptr,
                              const NumericCodeSpace structuralCodeSpace = NumericCodeSpace::unknown) {
             if (results.size() >= kMaximumCollectedRecords) return;
-            const auto bindingSection = IsBindingSection(NearbySection(utf8Content, offset));
+            const auto bindingSection = dedicatedFile || scopes.Contains(offset) || IsBindingSection(NearbySection(utf8Content, offset));
+            const auto keyLower = Lower(key);
+            if (bindingSection && (keyLower == "enabled" || keyLower == "version" || keyLower == "timeout" ||
+                keyLower == "delay" || keyLower == "duration" || keyLower == "repeat" || keyLower == "codespace")) return;
             if ((!LooksLikeBinding(key) && !bindingSection) || IsDisabled(raw) ||
                 !BareBindingNameHasMeaning(key, context, utf8Content, offset)) return;
             auto codeSpace = InferNumericCodeSpace(key);
             bool fallbackUsed = false;
             if (codeSpace == NumericCodeSpace::unknown) codeSpace = structuralCodeSpace;
             if (codeSpace == NumericCodeSpace::unknown) codeSpace = InferContextCodeSpace(context);
+            if (codeSpace == NumericCodeSpace::unknown) codeSpace = documentCodeSpace;
             if (codeSpace == NumericCodeSpace::unknown) {
                 codeSpace = InferPathCodeSpace(source);
                 fallbackUsed = codeSpace != NumericCodeSpace::unknown;
@@ -953,8 +979,12 @@ namespace UHI::Scanners
         static const std::regex assignment(
             R"UHI((?:"([^"]{1,128})"|'([^']{1,128})'|([A-Za-z0-9_.-]+))\s*[:=]\s*(?:"([^"]*)"|'([^']*)'|([^,\s{}\]#;<>"']+)))UHI",
             std::regex::icase);
+        static const std::regex yamlAssignment(
+            R"UHI((?:"([^"]{1,128})"|'([^']{1,128})'|([A-Za-z0-9_.-]+))[\t ]*[:=][\t ]*(?:"([^"]*)"|'([^']*)'|([^,\s{}\]#;<>"']+)))UHI",
+            std::regex::icase);
+        const auto& assignmentPattern = extension == ".yaml" || extension == ".yml" ? yamlAssignment : assignment;
         std::vector<Assignment> assignments;
-        for (std::sregex_iterator iterator(content.begin(), content.end(), assignment), end; iterator != end; ++iterator) {
+        for (std::sregex_iterator iterator(content.begin(), content.end(), assignmentPattern), end; iterator != end; ++iterator) {
             const auto& match = *iterator;
             const auto key = match[1].matched ? match[1].str() : match[2].matched ? match[2].str() : match[3].str();
             const auto raw = match[4].matched ? match[4].str() : match[5].matched ? match[5].str() : match[6].str();
@@ -1140,7 +1170,7 @@ namespace UHI::Scanners
                             std::scoped_lock lock(progressMutex);
                             ReportItemProgress(itemProgress, source, finished.load(), candidates.size(), 35.0F);
                         }
-                        if (MayContainBinding(probe)) {
+                        if (IsDedicatedBindingName(UHI::PathToUtf8(source.stem())) || MayContainBinding(probe)) {
                             input.clear();
                             input.seekg(0, std::ios::beg);
                             const std::string bytes((std::istreambuf_iterator<char>(input)), {});

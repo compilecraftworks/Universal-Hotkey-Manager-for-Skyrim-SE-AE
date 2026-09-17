@@ -1,4 +1,4 @@
-# Universal Hotkey Manager for Skyrim SE-AE 1.0.6 - Installation
+# Universal Hotkey Manager for Skyrim SE-AE 1.0.7 - Installation
 
 ## Requirements
 
@@ -12,7 +12,7 @@ The in-game interface defaults to automatic Windows-language detection and suppo
 
 ## Mod Organizer 2
 
-1. Install `Universal Hotkey Manager for Skyrim SE-AE 1.0.6.zip` as a normal mod.
+1. Install `Universal Hotkey Manager for Skyrim SE-AE 1.0.7.zip` as a normal mod.
 2. Enable Universal Hotkey Manager for Skyrim SE-AE after SKSE64 and Address Library.
 3. Start the game through SKSE.
 4. Press `Del` to open the manager, open **Options**, then press **Start full scan**.
@@ -29,16 +29,18 @@ To edit an installed loose controlmap through UHM, close Skyrim, back up and del
 
 ## Updating
 
-Replace the previous UHM files with the files from the new release. Version 1.0.6 contains only the SKSE plugin and minimal license documentation; it does not create an ESP or load-order entry.
+Replace the previous UHM files with the files from the new release. Version 1.0.7 contains only the SKSE plugin, its INI and UI assets, and minimal license documentation; it does not create an ESP or load-order entry.
 
 ## Files
 
 - `SKSE/Plugins/UniversalHotkeyManager.dll` - main plugin
 - `SKSE/Plugins/UniversalHotkeyManager.ini` - opening key, exact left/right Ctrl/Shift/Alt chord, UI scale, and UI language
-- `README.md` - feature and safety documentation
-- `CHANGELOG.md` - release changes
-- `CHANGELOG_KO.md` - 한글 업데이트 이력
+- `SKSE/Plugins/UniversalHotkeyManager/assets/` - packaged mouse and gamepad line art
+- `LICENSE` - GPL-3.0-or-later license text
+- `THIRD_PARTY_NOTICES.md` - third-party component notices
 - `ThirdPartyLicenses/` - notices required by statically linked libraries
+
+The runtime package does not include `README.md` or the changelogs. They are published in the GitHub source repository.
 
 The scan cache is created at virtual `Data/SKSE/Plugins/UniversalHotkeyManager/scan-cache-v1.bin`. Under MO2 this normally lands in Overwrite. It may be deleted safely; the next scan rebuilds it.
 
@@ -51,14 +53,25 @@ Both cache files are written immediately after a successful scan. They are indep
 If the configured opening key conflicts, edit virtual `Data/SKSE/Plugins/UniversalHotkeyManager.ini`. With MO2 this is normally `Overwrite\SKSE\Plugins\UniversalHotkeyManager.ini`.
 
 - `ToggleKey=0xD3` is Delete in DirectInput scan-code form.
+- `Enabled=false` completely disables UHM's native shortcut; API launchers remain available. Use `Enabled=true` to recover it.
 - `Ctrl`, `Shift`, and `Alt` enable exact modifier matching.
 - `CtrlKey`, `ShiftKey`, and `AltKey` can preserve a left/right modifier scan code.
 - `Language=Automatic`, `Korean`, `English`, or `Chinese` controls UI language.
 - `UiScale=0.80` through `1.35` controls overall text size.
 - `WindowOpacity=0.35` through `1.00` controls only the main UHM window background.
+- `ReadableTheme=true` selects warm high-contrast text (default: false).
+- Text uses the current Windows UI font, with Windows-installed Malgun Gothic for Korean and Microsoft YaHei/JhengHei for Chinese. UHM does not bundle or install font files.
 
 Close Skyrim before editing or deleting the INI. Deleting it restores Delete, 100% text size, 90% window opacity, and automatic language selection.
 
 ## Removal
 
 Disable or remove the UHM mod in MO2. UHM does not add forms to save games. Reports and logs under the active SKSE log directory may be removed separately if desired.
+
+## Unbinding and restoring a hotkey
+
+Open **Change hotkey**, choose **Unbind**, then **Save change**. Only formats with a verified unbound representation support this operation. UHM cannot add modifier storage to a mod that stores one scalar code; configure such chords through that mod's own modifier or virtual-key integration.
+
+**Restore original backup** previews the original value from the adjacent `.uhi.bak`; Save restores just that setting. The **Backups** tab keeps up to 256 changes made by UHM 1.0.7 and later in `SKSE/Plugins/UniversalHotkeyManager/binding-history-v1.bin`. It also lets you restore an unbound action. Select a previous value and save. External edits or moved source lines require a fresh scan; UHM refuses a stale restore. For live MCM values, load the intended save before restoring and save the game afterward.
+
+Right-click a key to browse all its actions when the hover summary says “more.”

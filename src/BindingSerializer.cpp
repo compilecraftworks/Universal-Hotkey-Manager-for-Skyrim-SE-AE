@@ -202,6 +202,17 @@ namespace
 
 namespace UHI
 {
+    SerializedBinding SerializeUnboundBinding(const HotkeyRecord& record)
+    {
+        if (!record.editable) return { {}, {}, "This binding is read-only." };
+        const auto system = LowerAscii(record.codeSystem);
+        if (system.contains("controlmap")) return { "Unbound", "0xff", {} };
+        if (system.contains("skse unified") && !record.rawBinding.starts_with('[') &&
+            record.rawBinding.find_first_of(",+") == std::string::npos) return { "Unbound", "-1", {} };
+        if (system.contains("community shaders")) return { "Unbound", record.rawBinding.starts_with('[') ? "[]" : "0", {} };
+        if (system.contains("reshade tuple")) return { "Unbound", "0,0,0,0", {} };
+        return { {}, {}, "The source does not declare a safe unbound value. Use the owning mod's menu for this setting." };
+    }
     SerializedBinding SerializeCapturedBinding(const HotkeyRecord& record,
         const std::string_view mainDevice, const std::uint32_t mainCode,
         const std::string_view modifierDevice, const std::uint32_t modifierCode)
@@ -291,11 +302,11 @@ namespace UHI
         // cannot persist a modifier and a main key in the same value.  Never
         // emit a visually plausible "42+63" string that the owning Papyrus
         // script would later fail to read as an integer.
-        if (system.find("skse unified") != std::string::npos &&
+        if (system.find("community shaders") == std::string::npos && system.find("controlmap") == std::string::npos &&
             !record.rawBinding.starts_with('[') &&
             record.rawBinding.find(',') == std::string::npos &&
             record.rawBinding.find('+') == std::string::npos) {
-            return { {}, {}, "This MCM/SKSE setting stores one key code and cannot represent a modifier chord." };
+            return { {}, {}, "This setting stores one key code and cannot represent a modifier chord. Use the owning mod's modifier/virtual-key integration." };
         }
         const auto modifierRaw = NumericLike(*modifierValue, record.rawBinding);
         if (system.find("community shaders") != std::string::npos || record.rawBinding.starts_with('['))

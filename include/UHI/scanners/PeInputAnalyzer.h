@@ -25,6 +25,7 @@ namespace UHI::Scanners
     class PeInputAnalyzer
     {
     public:
+        [[nodiscard]] bool ImportsWindowsKeyInput(const std::filesystem::path& dll) const noexcept;
         // Read-only PE import and x86-64 analysis. The DLL is never loaded.
         [[nodiscard]] std::vector<HotkeyRecord> Scan(const std::filesystem::path& dll,
             const CancelCallback& cancel = {}) const noexcept;

@@ -735,6 +735,18 @@ namespace
 
 namespace UHI::Scanners
 {
+    bool PeInputAnalyzer::ImportsWindowsKeyInput(const std::filesystem::path& dll) const noexcept
+    {
+        try {
+            PeImage image(dll);
+            std::unordered_map<std::uint32_t, std::string> imports;
+            if (!image.Parse() || !image.ReadImports(imports)) return false;
+            return std::ranges::any_of(imports, [](const auto& entry) {
+                return entry.second == "GetAsyncKeyState" || entry.second == "GetKeyState" ||
+                    entry.second == "RegisterHotKey";
+            });
+        } catch (...) { return false; }
+    }
     std::vector<HotkeyRecord> PeInputAnalyzer::Scan(const std::filesystem::path& dll,
         const CancelCallback& cancel) const noexcept
     {

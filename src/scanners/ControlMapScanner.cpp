@@ -114,7 +114,7 @@ namespace
         std::ranges::transform(action, action.begin(), [](const unsigned char ch) {
             return static_cast<char>(std::tolower(ch));
         });
-        return action.find("console") != std::string::npos ||
+        return (action.find("console") != std::string::npos && action != "console" && action != "consolekey") ||
             action.find("debug") != std::string::npos ||
             action.find("creation") != std::string::npos ||
             action.find("marketplace") != std::string::npos;
@@ -212,7 +212,7 @@ namespace UHI::Scanners
                         .evidencePath = source,
                         .evidenceLine = lineNumber,
                         .stage = ScanStage::configuration,
-                        .editable = true,
+                        .editable = action != "Console" && action != "ConsoleKey",
                         .conflictEligible = parsed.conflictEligible,
                         .contextMask = static_cast<std::uint32_t>(currentContext),
                         .contextConfidence = ContextConfidence::confirmed
@@ -234,7 +234,7 @@ namespace UHI::Scanners
             std::string_view gamepad;
             std::size_t line;
         };
-        static constexpr std::array<Row, 42> rows{{
+        static constexpr std::array<Row, 43> rows{{
             { "Forward", "0x11", "0xff", "0xff", 15 },
             { "Back", "0x1f", "0xff", "0xff", 16 },
             { "Strafe Left", "0x1e", "0xff", "0xff", 17 },
@@ -276,7 +276,8 @@ namespace UHI::Scanners
             { "Quick Inventory", "0x17", "0xff", "0xff", 54 },
             { "Quick Magic", "0x19", "0xff", "0xff", 55 },
             { "Quick Stats", "0x35", "0xff", "0xff", 56 },
-            { "Quick Map", "0x32", "0xff", "0xff", 57 }
+            { "Quick Map", "0x32", "0xff", "0xff", 57 },
+            { "Console", "0x29", "0xff", "0xff", 0 }
         }};
 
         // This is a logical loose-override path only. The built-in default

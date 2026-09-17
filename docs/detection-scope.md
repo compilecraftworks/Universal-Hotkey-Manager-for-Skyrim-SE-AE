@@ -7,6 +7,8 @@ Scanning is user-triggered from **Options**. UHM never performs a full mod-tree 
 - Built-in Skyrim controls, overridden only by an active loose `Data/Interface/Controls/PC/controlmap.txt`
 - Effective loose INI, JSON/JSONC, TOML, YAML, XML, CFG, CONF, SETTINGS, PROPERTIES, and relevant TXT settings
 - ReShade, ENB, Community Shaders, current SKSE-plugin settings, and relevant JContainers data
+- Dedicated hotkey documents and nested JSON/YAML binding maps are recognized even when individual action names omit “key.” Integral float exports such as `78.0` are accepted; fractional codes are rejected. Matching native DLL imports provide an inferred Windows-VK convention for dedicated native key documents when no explicit code-space declaration exists.
+- Community Shaders settings are active only when its DLL is loaded, including when restoring an earlier snapshot.
 - Mod BSAs only; Bethesda base-game, DLC, CC/AE, and shared Creations BSAs are excluded
 - `ControlMap_Custom.txt`, `*_KID.ini`, resources, presets, backups, translations, logs, and files without input markers are excluded from the active inventory
 
@@ -31,8 +33,12 @@ Scanning is user-triggered from **Options**. UHM never performs a full mod-tree 
 
 ## Editing
 
+The manager includes mod-interface-only keys with an explicit scope label; they remain excluded from gameplay conflict analysis. The console launcher is visible and read-only, while console-internal and debug commands remain excluded. Right-clicking a device key opens the complete scrollable action list.
+
+Unbind uses verified source-specific sentinels, never a universal zero. The editor can restore one setting from its original `.uhi.bak`. The Backups tab keeps up to 256 changes and verifies the expected current value before restoring an earlier value. Settings without a known disable convention remain guarded. UHM does not allocate Beyond VirtualKey IDs or replace its mapping/backup system.
+
 Supported effective loose files and a loose `controlmap.txt` are editable. UHM serializes the captured key back into the record's original DirectInput, SKSE unified, Windows-VK, XInput/controlmap, ReShade, Community Shaders, ENB single-key, or symbolic representation. The writer verifies the original line and value, creates a first-write `.uhi.bak`, atomically replaces the file, and rescans. Matching registered SkyUI MCM values are synchronized on Skyrim's main task through the owning key-map event when possible, or through one exact unambiguous property with an explicit refresh notice. If live MCM synchronization fails after a linked document was written, UHM restores the verified original document value and explicitly reports that the original hotkey was restored. A successful save-backed Papyrus/MCM edit without a persistent document source tells the user that the game must be saved to retain it after the next load. A scalar SKSE/MCM value refuses modifier chords it cannot encode. Lossy cross-device conversion, archives, XML/UTF-16 writing, inactive variants, ambiguous MCM values, and hard-coded PEX/DLL values are refused and remain read-only.
 
 ## Incremental refresh
 
-After the first full scan, loading a save or newly opening UHM schedules one metadata-and-cache refresh. Unchanged files reuse cached positive or negative results; only new, removed, or fingerprint-changed evidence is reparsed. There is no continuous filesystem watcher or frame-by-frame polling. Newly added or changed active bindings produce one undimmed notification the next time the manager is visible.
+After the first full scan, a completed save load schedules one metadata-and-cache refresh. Opening the manager by itself restores the validated snapshot and does not rescan. Unchanged files reuse cached positive or negative results; only new, removed, or fingerprint-changed evidence is reparsed. There is no continuous filesystem watcher or frame-by-frame polling. Newly added or changed active bindings produce one undimmed notification the next time the manager is visible.

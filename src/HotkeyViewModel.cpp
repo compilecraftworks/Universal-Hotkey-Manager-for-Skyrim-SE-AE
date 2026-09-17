@@ -6,7 +6,7 @@
 
 namespace UHI
 {
-    std::vector<HotkeyViewGroup> BuildHotkeyView(const Registry& registry)
+    std::vector<HotkeyViewGroup> BuildHotkeyView(const Registry& registry, const bool includeUiLocal)
     {
         const auto analysis = registry.AnalyzeConflicts();
 
@@ -19,7 +19,7 @@ namespace UHI
             // Scanner evidence with an unresolved code remains in reports and
             // snapshots, but it is not a physical binding and therefore does
             // not belong in the device map or the normal shortcut list.
-            if (!record.runtimeActive || !record.conflictEligible || record.uiLocalOnly ||
+            if (!record.runtimeActive || !record.conflictEligible || (record.uiLocalOnly && !includeUiLocal) ||
                 !physicalDevice || record.binding.empty()) {
                 ++recordIndex;
                 continue;

@@ -1,5 +1,7 @@
 #include "UHI/NativeImGuiHost.h"
 #include "UHI/SkyrimRuntimeLayout.h"
+#include "UHI/OpeningHotkey.h"
+#include "UHI/NativeFontAtlas.h"
 
 #include <RE/R/Renderer.h>
 #include <REL/Relocation.h>
@@ -17,6 +19,7 @@
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace RE
 {
@@ -55,6 +58,10 @@ namespace
     std::string g_imguiIniPath;
     HWND g_outputWindow{};
     WNDPROC g_previousWindowProc{};
+    std::atomic_bool g_readableTheme{};
+    ImFont* g_standardFont{};
+    std::mutex g_modalMouseMutex;
+    std::vector<std::pair<unsigned, bool>> g_modalMouseEvents;
 
     LRESULT CALLBACK UhmWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
     {
@@ -95,8 +102,10 @@ namespace
         if (reinterpret_cast<WNDPROC>(GetWindowLongPtr(g_outputWindow, GWLP_WNDPROC)) == &UhmWindowProc) {
             SetWindowLongPtr(g_outputWindow, GWLP_WNDPROC,
                 reinterpret_cast<LONG_PTR>(g_previousWindowProc));
+            g_previousWindowProc = nullptr;
         }
-        g_previousWindowProc = nullptr;
+        // A later plugin may still chain through UhmWindowProc. Keep its
+        // predecessor callable even when our renderer initialization fails.
     }
 
     struct KeyMapping
@@ -160,61 +169,21 @@ namespace
         return ImGuiKey_None;
     }
 
-    void AddMergedFont(ImGuiIO& io, const char* path, const ImWchar* ranges)
-    {
-        if (!std::filesystem::exists(std::filesystem::path(path))) return;
-        ImFontConfig config{};
-        config.MergeMode = true;
-        config.PixelSnapH = true;
-        // Match the proven SFS font-atlas settings. CJK glyphs are already
-        // rendered at a large base size, so extra oversampling only inflates
-        // the GPU texture without improving the in-game result materially.
-        config.OversampleH = 1;
-        config.OversampleV = 1;
-        io.Fonts->AddFontFromFileTTF(path, 32.0F, &config, ranges);
-    }
-
     bool BuildFontAtlas(ImGuiIO& io)
     {
-        io.Fonts->Clear();
-        // Keep a wide atlas so the combined English/Korean/Chinese glyph set
-        // grows horizontally instead of exceeding D3D11's texture height.
-        io.Fonts->TexDesiredWidth = 4096;
-        ImFontConfig baseConfig{};
-        baseConfig.OversampleH = 1;
-        baseConfig.OversampleV = 1;
-        baseConfig.PixelSnapH = true;
-        constexpr auto* basePath = "C:\\Windows\\Fonts\\segoeui.ttf";
-        if (std::filesystem::exists(std::filesystem::path(basePath))) {
-            io.FontDefault = io.Fonts->AddFontFromFileTTF(
-                basePath, 32.0F, &baseConfig, io.Fonts->GetGlyphRangesDefault());
-        } else {
-            io.FontDefault = io.Fonts->AddFontDefault();
-            SKSE::log::warn("Segoe UI was not found; UHM is using Dear ImGui's fallback font");
-        }
-
-        AddMergedFont(io, "C:\\Windows\\Fonts\\malgun.ttf", io.Fonts->GetGlyphRangesKorean());
-        AddMergedFont(io, "C:\\Windows\\Fonts\\msyh.ttc", io.Fonts->GetGlyphRangesChineseSimplifiedCommon());
-
-        if (!io.Fonts->Build()) {
-            SKSE::log::error("Could not build the UHM English/Korean/Chinese font atlas");
+        const auto fonts = UHI::BuildNativeFontAtlas(*io.Fonts);
+        io.FontDefault = g_standardFont = fonts.standard;
+        const auto preferences = UHI::LoadOpeningHotkey(std::filesystem::current_path() /
+            "Data/SKSE/Plugins/UniversalHotkeyManager.ini");
+        g_readableTheme = preferences.readableTheme;
+        if (!fonts.valid) {
+            SKSE::log::error("UHM font atlas is invalid for D3D11: {}x{}", io.Fonts->TexWidth, io.Fonts->TexHeight);
             return false;
         }
-
-        constexpr auto maxTextureDimension = static_cast<int>(D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION);
-        if (io.Fonts->TexWidth <= 0 || io.Fonts->TexHeight <= 0 ||
-            io.Fonts->TexWidth > maxTextureDimension || io.Fonts->TexHeight > maxTextureDimension) {
-            SKSE::log::error(
-                "UHM font atlas is not valid for D3D11: {}x{} (maximum {}x{})",
-                io.Fonts->TexWidth, io.Fonts->TexHeight, maxTextureDimension, maxTextureDimension);
-            return false;
-        }
-
-        SKSE::log::info("Built UHM English/Korean/Chinese font atlas: {}x{}",
-            io.Fonts->TexWidth, io.Fonts->TexHeight);
+        SKSE::log::info("Built UHM Windows English/Korean/Chinese font atlas: {}x{}, system UI font={}",
+            io.Fonts->TexWidth, io.Fonts->TexHeight, fonts.systemDefaultUsed);
         return true;
     }
-
     bool ValidateFontTexture(ID3D11Device* device, ImGuiIO& io)
     {
         if (!device || !io.Fonts || !io.Fonts->IsBuilt()) return false;
@@ -520,7 +489,26 @@ namespace
             const ScopedImGuiContext context(g_imguiContext);
             ImGui_ImplWin32_NewFrame();
             ImGui_ImplDX11_NewFrame();
+            // Scaleform sends aggregate modifiers. Publish physical left/right
+            // keys as well, so capture still works when another sink stops the
+            // Skyrim input batch before it reaches this menu.
+            auto& io = ImGui::GetIO();
+            const bool focused = GetForegroundWindow() == g_outputWindow;
+            for (const auto& [key, vk] : std::array{
+                std::pair{ImGuiKey_LeftCtrl, VK_LCONTROL}, std::pair{ImGuiKey_RightCtrl, VK_RCONTROL},
+                std::pair{ImGuiKey_LeftShift, VK_LSHIFT}, std::pair{ImGuiKey_RightShift, VK_RSHIFT},
+                std::pair{ImGuiKey_LeftAlt, VK_LMENU}, std::pair{ImGuiKey_RightAlt, VK_RMENU}})
+                io.AddKeyEvent(key, focused && (GetAsyncKeyState(vk) & 0x8000) != 0);
+            io.FontDefault = g_standardFont;
+            ImGui::GetStyle().Colors[ImGuiCol_Text] = g_readableTheme.load() ?
+                ImVec4(1.0F, 0.95F, 0.82F, 1.0F) : ImVec4(0.94F, 0.96F, 0.99F, 1.0F);
             UpdateMousePosition();
+            {
+                std::scoped_lock lock(g_modalMouseMutex);
+                for (const auto& [button, down] : g_modalMouseEvents)
+                    io.AddMouseButtonEvent(static_cast<int>(button), down);
+                g_modalMouseEvents.clear();
+            }
             const auto wheelSteps = g_pendingMouseWheelSteps.exchange(0, std::memory_order_relaxed);
             if (wheelSteps != 0) {
                 ImGui::GetIO().AddMouseWheelEvent(0.0F, static_cast<float>(wheelSteps));
@@ -647,6 +635,18 @@ namespace
 
 namespace UHI::NativeImGuiHost
 {
+    void SubmitModalMouseButton(const unsigned button, const bool down) noexcept
+    {
+        if (button >= 5U) return;
+        try {
+            std::scoped_lock lock(g_modalMouseMutex);
+            if (g_modalMouseEvents.size() < 128U) g_modalMouseEvents.emplace_back(button, down);
+        } catch (...) {}
+    }
+    void SetAppearance(const bool readableTheme) noexcept
+    {
+        g_readableTheme = readableTheme;
+    }
     void SubmitMouseWheel(const float delta) noexcept
     {
         if (delta > 0.0F) {

@@ -18,6 +18,8 @@ namespace UHI
     struct OpeningHotkey
     {
         std::uint32_t scanCode{ 0xD3 }; // Delete
+        bool enabled{ true };
+        bool readableTheme{};
         bool ctrl{};
         bool shift{};
         bool alt{};

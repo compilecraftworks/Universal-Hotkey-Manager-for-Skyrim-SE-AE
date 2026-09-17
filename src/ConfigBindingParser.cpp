@@ -34,6 +34,15 @@ namespace
         while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) value.remove_suffix(1);
         const bool hex = value.size() > 2 && value[0] == '0' && (value[1] == 'x' || value[1] == 'X');
         if (hex) value.remove_prefix(2);
+        // Native MCM exporters serialize TESGlobal values as JSON floats.
+        // Accept only an exactly integral decimal suffix, never round a value.
+        if (!hex) {
+            if (const auto dot = value.find('.'); dot != std::string_view::npos) {
+                const auto fraction = value.substr(dot + 1U);
+                if (fraction.empty() || !std::ranges::all_of(fraction, [](char c) { return c == '0'; })) return false;
+                value = value.substr(0, dot);
+            }
+        }
         if (value.empty()) return false;
         const auto [last, error] = std::from_chars(value.data(), value.data() + value.size(), result, hex ? 16 : 10);
         return error == std::errc{} && last == value.data() + value.size();

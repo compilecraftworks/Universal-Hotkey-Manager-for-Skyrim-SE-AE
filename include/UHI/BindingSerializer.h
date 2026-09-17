@@ -23,4 +23,5 @@ namespace UHI
     [[nodiscard]] SerializedBinding SerializeCapturedBinding(const HotkeyRecord& record,
         std::string_view mainDevice, std::uint32_t mainCode,
         std::string_view modifierDevice = {}, std::uint32_t modifierCode = 0U);
+    [[nodiscard]] SerializedBinding SerializeUnboundBinding(const HotkeyRecord& record);
 }

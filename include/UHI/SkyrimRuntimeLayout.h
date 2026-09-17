@@ -67,7 +67,7 @@ namespace UHI
         // The verified flat SE/AE families are Skyrim 1.5 and 1.6.  Do not
         // guess a future layout: using a wrong count reads the following
         // ControlMap runtime data as an InputContext pointer.
-        if (major != 1 || (minor != 5 && minor != 6)) return std::nullopt;
+        if (!NativeRendererHookLayoutForVersion(major, minor, patch, 0)) return std::nullopt;
 
         const bool hasMarketplace = minor == 6 && patch >= 1130;
         return SkyrimInputContextLayout{
