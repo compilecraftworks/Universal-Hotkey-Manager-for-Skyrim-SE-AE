@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(UniversalHotkeyManager VERSION 1.0.7 LANGUAGES CXX)
+project(UniversalHotkeyManager VERSION 1.0.8 LANGUAGES CXX)
 
 find_package(ZLIB REQUIRED)
 find_package(lz4 CONFIG REQUIRED)
@@ -102,6 +102,9 @@ endif()
 
 if(UHI_BUILD_TESTS)
     enable_testing()
+    add_executable(uhi_native_menu_lifecycle_tests tests/NativeMenuLifecycleTests.cpp)
+    target_include_directories(uhi_native_menu_lifecycle_tests PRIVATE include)
+    add_test(NAME uhi_native_menu_lifecycle_tests COMMAND uhi_native_menu_lifecycle_tests)
     if(TARGET uhi_native_font_tests)
         add_test(NAME uhi_native_font_tests COMMAND uhi_native_font_tests)
     endif()

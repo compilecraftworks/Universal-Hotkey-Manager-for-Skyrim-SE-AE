@@ -16,9 +16,9 @@ An ESP-free SKSE plugin that scans the active Skyrim SE/AE mod environment and p
 
 ## Requirements
 
-- Skyrim Special Edition or Anniversary Edition
-- SKSE64
-- Address Library / CommonLib-compatible runtime
+- Skyrim SE **1.5.97**, or AE **1.6.317 / 318 / 323 / 342 / 353 / 629 / 640 / 659 / 678 / 1130 / 1170 / 1179**
+- **Skyrim 1.7.x and VR are not supported.**
+- SKSE64 and Address Library for SKSE Plugins matching your Skyrim version
 - Microsoft Visual C++ Redistributable
 
 ## Install and use

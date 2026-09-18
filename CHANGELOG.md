@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.8 - 2026-09-18
+
+- Fix stale menu visibility that could keep consuming mouse-wheel input after UHM closed, preventing character camera zoom until a save reload. Rendering no longer owns a separate open-state flag, and closing menus cannot render or queue another cursor show.
+- Clean up popup/capture state, pending mouse input and cursor ownership on normal hide, forced hide and menu destruction. Cancel obsolete queued visibility/cursor requests and preserve another menu's cursor ownership.
+- Route the close button, Escape, opening shortcut and external close API through the same cleanup path. Clear stale ImGui input and popups before reopening.
+- Add menu lifecycle regression coverage, including delayed close, forced hide, repeated cleanup, obsolete queued work and 100 open/close cycles. Clean SE/AE build and all 25 automated tests passed; the reported camera-zoom symptom still needs in-game confirmation.
+- Runtime support is unchanged: SE 1.5.97 and the documented 1.6.x AE versions. Skyrim 1.7.x and VR are not supported.
+
 ## 1.0.7 - 2026-09-18
 
 - Process complete input batches during capture; preserve left/right modifiers and keyboard modifiers with mouse input. Disabled/unready UHM shortcuts no longer stop other input sinks. Forward popup mouse input and wheel scrolling while UHM owns the modal.

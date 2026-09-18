@@ -2,6 +2,7 @@
 #include "UHI/SkyrimRuntimeLayout.h"
 #include "UHI/OpeningHotkey.h"
 #include "UHI/NativeFontAtlas.h"
+#include "UHI/NativeMenuLifecycle.h"
 
 #include <RE/R/Renderer.h>
 #include <REL/Relocation.h>
@@ -11,6 +12,7 @@
 #include <d3d11.h>
 #include <dxgi.h>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 
@@ -44,11 +46,13 @@ namespace
     constexpr std::string_view kMenuName = "UniversalHotkeyManagerMenu";
 
     UHI::NativeImGuiHost::RenderCallback g_renderCallback{};
+    UHI::NativeImGuiHost::CloseCallback g_closeCallback{};
     std::atomic_bool g_registered{};
     std::atomic_bool g_rendererHookInstalled{};
-    std::atomic_bool g_open{};
-    std::atomic_bool g_requestedOpen{};
+    UHI::NativeMenuLifecycle g_menuLifecycle;
     std::atomic_bool g_cursorOwnedByHost{};
+    std::atomic_uint64_t g_pendingCursorShow{};
+    std::atomic_bool g_resetImGuiInput{ true };
     std::atomic_int g_pendingMouseWheelSteps{};
     std::mutex g_rendererMutex;
     ImGuiContext* g_imguiContext{};
@@ -69,7 +73,7 @@ namespace
         // to a native IMenu.  Receive the actual Windows message as the
         // authoritative fallback, so ImGui tables always scroll under the
         // pointer.  We consume it only while UHM owns the open menu.
-        if (message == WM_MOUSEWHEEL && g_open.load() && g_rendererInitialized && g_imguiContext) {
+        if (message == WM_MOUSEWHEEL && g_menuLifecycle.CanRender() && g_rendererInitialized && g_imguiContext) {
             const auto delta = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wParam)) /
                 static_cast<float>(WHEEL_DELTA);
             if (delta != 0.0F) {
@@ -442,7 +446,7 @@ namespace
 
     void ProcessScaleformEvent(const RE::BSUIScaleformData* data)
     {
-        if (!data || !data->scaleformEvent || !g_rendererInitialized || !g_imguiContext) return;
+        if (!g_menuLifecycle.CanRender() || !data || !data->scaleformEvent || !g_rendererInitialized || !g_imguiContext) return;
         const ScopedImGuiContext context(g_imguiContext);
         const auto* event = data->scaleformEvent;
         auto& io = ImGui::GetIO();
@@ -483,10 +487,25 @@ namespace
     class NativeMenu final : public RE::IMenu
     {
     public:
+        ~NativeMenu() override
+        {
+            if (g_menuLifecycle.IsOpen()) {
+                g_menuLifecycle.Closed();
+                FinishClose();
+            }
+        }
+
         void PostDisplay() override
         {
-            if (!g_rendererInitialized || !g_win32Initialized || !g_dx11Initialized || !g_imguiContext) return;
+            if (!g_menuLifecycle.CanRender() || !g_rendererInitialized || !g_win32Initialized || !g_dx11Initialized || !g_imguiContext) return;
             const ScopedImGuiContext context(g_imguiContext);
+            const bool resetInput = g_resetImGuiInput.exchange(false);
+            if (resetInput) {
+                auto& io = ImGui::GetIO();
+                io.ClearEventsQueue();
+                io.ClearInputKeys();
+                io.ClearInputMouse();
+            }
             ImGui_ImplWin32_NewFrame();
             ImGui_ImplDX11_NewFrame();
             // Scaleform sends aggregate modifiers. Publish physical left/right
@@ -514,6 +533,7 @@ namespace
                 ImGui::GetIO().AddMouseWheelEvent(0.0F, static_cast<float>(wheelSteps));
             }
             ImGui::NewFrame();
+            if (resetInput) ImGui::ClosePopupToLevel(0, false);
             if (g_renderCallback) g_renderCallback();
             ImGui::Render();
             ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
@@ -522,23 +542,36 @@ namespace
 
         RE::UI_MESSAGE_RESULTS ProcessMessage(RE::UIMessage& message) override
         {
-            switch (message.type.get()) {
-            case RE::UI_MESSAGE_TYPE::kShow:
-                g_open = true;
-                g_requestedOpen = true;
-                break;
-            case RE::UI_MESSAGE_TYPE::kHide:
-                g_open = false;
-                g_requestedOpen = false;
-                ReleaseCursor();
-                break;
-            case RE::UI_MESSAGE_TYPE::kScaleformEvent:
+            const auto change = g_menuLifecycle.ProcessMessage(message.type.get());
+            if (change == UHI::NativeMenuLifecycle::Change::hidden) {
+                FinishClose();
+            } else if (change == UHI::NativeMenuLifecycle::Change::shown) {
+                g_resetImGuiInput = true;
+                // A show message already posted to Skyrim can arrive after
+                // its request was cancelled. Do not leave an invisible menu
+                // on the engine stack holding the pause/input context.
+                if (!g_menuLifecycle.CanRender()) {
+                    if (auto* queue = RE::UIMessageQueue::GetSingleton())
+                        queue->AddMessage(kMenuName, RE::UI_MESSAGE_TYPE::kHide, nullptr);
+                }
+            } else if (message.type == RE::UI_MESSAGE_TYPE::kScaleformEvent) {
                 ProcessScaleformEvent(reinterpret_cast<const RE::BSUIScaleformData*>(message.data));
                 return RE::UI_MESSAGE_RESULTS::kHandled;
-            default:
-                break;
             }
             return IMenu::ProcessMessage(message);
+        }
+
+        static void FinishClose()
+        {
+            g_pendingCursorShow = 0;
+            g_pendingMouseWheelSteps = 0;
+            {
+                std::scoped_lock lock(g_modalMouseMutex);
+                g_modalMouseEvents.clear();
+            }
+            g_resetImGuiInput = true;
+            if (g_closeCallback) g_closeCallback();
+            ReleaseCursor();
         }
 
         static RE::IMenu* Creator()
@@ -558,10 +591,24 @@ namespace
     private:
         static void ReleaseCursor()
         {
-            if (!g_cursorOwnedByHost.exchange(false)) return;
+            if (!g_cursorOwnedByHost.load()) return;
+            const auto ticket = g_menuLifecycle.Revision();
             if (auto* tasks = SKSE::GetTaskInterface()) {
-                tasks->AddUITask([] {
+                tasks->AddUITask([ticket] {
+                    if (!g_menuLifecycle.IsCurrent(ticket) || g_menuLifecycle.CanRender()) return;
+                    // A different menu may have acquired the cursor since UHM
+                    // closed. Its normal engine lifecycle must retain control.
+                    if (auto* ui = RE::UI::GetSingleton()) {
+                        const auto cursor = ui->GetMenu(RE::CursorMenu::MENU_NAME);
+                        const auto ownMenu = ui->GetMenu(kMenuName);
+                        for (const auto& menu : ui->menuStack)
+                            if (menu && menu.get() != cursor.get() && menu.get() != ownMenu.get() && menu->UsesCursor()) {
+                                g_cursorOwnedByHost = false;
+                                return;
+                            }
+                    }
                     if (auto* queue = RE::UIMessageQueue::GetSingleton()) {
+                        g_cursorOwnedByHost = false;
                         queue->AddMessage(RE::CursorMenu::MENU_NAME, RE::UI_MESSAGE_TYPE::kHide, nullptr);
                     }
                 });
@@ -570,15 +617,26 @@ namespace
 
         static void ForceCursor()
         {
+            if (!g_menuLifecycle.CanRender()) return;
             auto* ui = RE::UI::GetSingleton();
             if (!ui || ui->IsMenuOpen(RE::CursorMenu::MENU_NAME)) return;
-            if (g_cursorOwnedByHost.exchange(true)) return;
+            const auto ticket = g_menuLifecycle.Revision();
+            std::uint64_t expected{};
+            if (!g_pendingCursorShow.compare_exchange_strong(expected, ticket)) return;
             if (auto* tasks = SKSE::GetTaskInterface()) {
-                tasks->AddUITask([] {
+                tasks->AddUITask([ticket] {
+                    auto pending = ticket;
+                    if (!g_pendingCursorShow.compare_exchange_strong(pending, 0)) return;
+                    if (!g_menuLifecycle.IsCurrent(ticket) || !g_menuLifecycle.CanRender()) return;
+                    auto* currentUi = RE::UI::GetSingleton();
+                    if (!currentUi || currentUi->IsMenuOpen(RE::CursorMenu::MENU_NAME)) return;
                     if (auto* queue = RE::UIMessageQueue::GetSingleton()) {
+                        g_cursorOwnedByHost = true;
                         queue->AddMessage(RE::CursorMenu::MENU_NAME, RE::UI_MESSAGE_TYPE::kShow, nullptr);
                     }
                 });
+            } else {
+                g_pendingCursorShow = 0;
             }
         }
     };
@@ -620,16 +678,28 @@ namespace
         static inline REL::Relocation<decltype(Thunk)> func;
     };
 
-    void QueueVisibility(const bool open)
+    bool QueueVisibility(const bool open)
     {
-        g_requestedOpen = open;
-        if (auto* tasks = SKSE::GetTaskInterface()) {
-            tasks->AddUITask([open] {
+        auto* tasks = SKSE::GetTaskInterface();
+        if (!tasks) return false;
+        const bool wasOpen = g_menuLifecycle.IsOpen();
+        const auto ticket = g_menuLifecycle.Request(open);
+        try {
+            tasks->AddUITask([open, ticket] {
+                if (!g_menuLifecycle.IsCurrent(ticket)) return;
                 if (auto* queue = RE::UIMessageQueue::GetSingleton()) {
                     queue->AddMessage(kMenuName, open ? RE::UI_MESSAGE_TYPE::kShow : RE::UI_MESSAGE_TYPE::kHide, nullptr);
+                } else {
+                    g_menuLifecycle.Closed();
+                    NativeMenu::FinishClose();
                 }
             });
+        } catch (...) {
+            if (g_menuLifecycle.IsCurrent(ticket)) g_menuLifecycle.Request(wasOpen);
+            SKSE::log::error("Unable to queue UHM menu visibility request");
+            return false;
         }
+        return true;
     }
 }
 
@@ -637,7 +707,7 @@ namespace UHI::NativeImGuiHost
 {
     void SubmitModalMouseButton(const unsigned button, const bool down) noexcept
     {
-        if (button >= 5U) return;
+        if (!g_menuLifecycle.CanRender() || button >= 5U) return;
         try {
             std::scoped_lock lock(g_modalMouseMutex);
             if (g_modalMouseEvents.size() < 128U) g_modalMouseEvents.emplace_back(button, down);
@@ -649,6 +719,7 @@ namespace UHI::NativeImGuiHost
     }
     void SubmitMouseWheel(const float delta) noexcept
     {
+        if (!g_menuLifecycle.CanRender()) return;
         if (delta > 0.0F) {
             g_pendingMouseWheelSteps.fetch_add(1, std::memory_order_relaxed);
         } else if (delta < 0.0F) {
@@ -681,38 +752,36 @@ namespace UHI::NativeImGuiHost
         return true;
     }
 
-    bool Register(const RenderCallback callback)
+    bool Register(const RenderCallback callback, const CloseCallback closed)
     {
         if (!callback) return false;
         g_renderCallback = callback;
+        g_closeCallback = closed;
         return true;
     }
 
     bool Open()
     {
         if (!IsReady()) return false;
-        if (!g_requestedOpen.load() && !g_open.load()) QueueVisibility(true);
+        if (!g_menuLifecycle.IsOpen()) return QueueVisibility(true);
         return true;
     }
 
     bool Toggle()
     {
         if (!IsReady()) return false;
-        const bool opening = !g_requestedOpen.load();
-        QueueVisibility(opening);
-        return true;
+        return QueueVisibility(!g_menuLifecycle.IsOpen());
     }
 
     bool Close()
     {
-        if (!g_registered.load() || (!g_requestedOpen.load() && !g_open.load())) return false;
-        QueueVisibility(false);
-        return true;
+        if (!g_registered.load() || !g_menuLifecycle.IsOpen()) return false;
+        return QueueVisibility(false);
     }
 
     bool IsOpen() noexcept
     {
-        return g_requestedOpen.load() || g_open.load();
+        return g_menuLifecycle.IsOpen();
     }
 
     bool IsReady() noexcept

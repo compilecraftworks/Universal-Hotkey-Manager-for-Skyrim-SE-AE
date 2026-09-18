@@ -124,7 +124,6 @@ namespace
     EditorModal g_editorModal{ EditorModal::none };
     std::atomic_bool g_modalInputActive{ false };
     std::atomic_bool g_cancelActivePopupRequested{ false };
-    std::atomic_bool g_renderWindowVisible{ false };
     // The next render frame explicitly gives the native ImGui window focus.
     std::atomic_bool g_focusWindowOnNextRender{ false };
     // A physical Escape that cancels a popup/capture remains owned by that
@@ -360,6 +359,24 @@ namespace
         g_openBindingPopup = false;
         g_focusRenameField = false;
         g_cancelActivePopupRequested = false;
+    }
+
+    void ResetMenuInteraction()
+    {
+        g_focusWindowOnNextRender = false;
+        g_openingHotkeyCaptureActive = false;
+        g_visibleRestoredScanNotice = false;
+        g_restoredScanNoticeOpenedAtMs = 0;
+        g_visibleChangedHotkeyNotice = 0U;
+        g_visibleBindingWriteNotice = BindingWriteNotice::none;
+        CloseEditorModal();
+        g_openBindingContextPopup = false;
+        g_bindingContextPopupActive = false;
+        g_contextRecord.reset();
+        g_escapeCloseGuard.Reset();
+        g_escapeConsumedByPopupThisFrame = false;
+        g_automaticRefreshRequestedForCurrentOpen = false;
+        SavePendingPreferences();
     }
 
     bool ConsumePopupCancelRequest()
@@ -2837,7 +2854,7 @@ namespace
 
     void __stdcall RenderHotkeyView()
     {
-        if (!HasImGuiContext()) {
+        if (!UHI::NativeImGuiHost::IsOpen() || !HasImGuiContext()) {
             return;
         }
         const bool escapePressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
@@ -2853,7 +2870,6 @@ namespace
             g_escapeCloseGuard.CurrentPhase() != UHI::EscapeCloseGuard::Phase::idle &&
             UHI::IsMenuFrameworkEscapeCloseSuppressed();
         g_escapeConsumedByPopupThisFrame = childUiOwnedEscape;
-        g_renderWindowVisible = true;
         // Hold one immutable result snapshot for the complete ImGui frame. A
         // worker may publish a newer scan without invalidating entry pointers.
         std::shared_ptr<const RegistrySnapshot> snapshot;
@@ -2936,14 +2952,11 @@ namespace
         // user with a late modal while they are already using this window.
         if (open) g_automaticRefreshRequestedForCurrentOpen = true;
         if (!open) {
-            g_renderWindowVisible = false;
-            g_openingHotkeyCaptureActive = false;
-            g_visibleRestoredScanNotice = false;
-            g_restoredScanNoticeOpenedAtMs = 0;
-            g_visibleChangedHotkeyNotice = 0U;
-            SavePendingPreferences();
-            UHI::NativeImGuiHost::Close();
-            g_automaticRefreshRequestedForCurrentOpen = false;
+            UHI::CloseMenuFrameworkWindow();
+            ImGui::End();
+            ImGui::PopStyleColor(20);
+            ImGui::PopStyleVar(9);
+            return;
         }
 
         // A restored cache is useful immediately, but it is not a newly
@@ -3809,7 +3822,7 @@ namespace UHI
 {
     bool RegisterMenuFrameworkWindow()
     {
-        return NativeImGuiHost::Register(RenderHotkeyView);
+        return NativeImGuiHost::Register(RenderHotkeyView, ResetMenuInteraction);
     }
 
     void SetMenuFrameworkRegistry(std::shared_ptr<const Registry> registry, const bool restored)
@@ -3841,45 +3854,23 @@ namespace UHI
             g_focusWindowOnNextRender = false;
             return false;
         }
-        g_renderWindowVisible = true;
         return true;
     }
 
     bool ToggleMenuFrameworkWindow()
     {
-        const bool wasOpen = NativeImGuiHost::IsOpen();
-        if (wasOpen) {
-            g_openingHotkeyCaptureActive = false;
-            g_visibleChangedHotkeyNotice = 0U;
-            CloseEditorModal();
-            SavePendingPreferences();
-        } else {
-            g_automaticRefreshRequestedForCurrentOpen = false;
-            g_focusWindowOnNextRender = true;
-        }
-        if (!NativeImGuiHost::Toggle()) return false;
-        g_renderWindowVisible = !wasOpen;
-        if (wasOpen) g_focusWindowOnNextRender = false;
-        return true;
+        return NativeImGuiHost::IsOpen() ? CloseMenuFrameworkWindow() : OpenMenuFrameworkWindow();
     }
 
     bool CloseMenuFrameworkWindow()
     {
-        if (!NativeImGuiHost::IsOpen() && !g_renderWindowVisible.load()) return false;
-        g_renderWindowVisible = false;
-        g_focusWindowOnNextRender = false;
-        g_openingHotkeyCaptureActive = false;
-        g_visibleChangedHotkeyNotice = 0U;
-        CloseEditorModal();
-        SavePendingPreferences();
-        NativeImGuiHost::Close();
-        g_automaticRefreshRequestedForCurrentOpen = false;
-        return true;
+        ResetMenuInteraction();
+        return NativeImGuiHost::Close();
     }
 
     bool IsMenuFrameworkWindowOpen() noexcept
     {
-        return NativeImGuiHost::IsOpen() || g_renderWindowVisible.load();
+        return NativeImGuiHost::IsOpen();
     }
 
     bool BeginMenuFrameworkOpeningHotkeyCapture() noexcept
@@ -3893,7 +3884,7 @@ namespace UHI
 
     bool IsMenuFrameworkOpeningHotkeyCaptureActive() noexcept
     {
-        return g_openingHotkeyCaptureActive.load();
+        return NativeImGuiHost::IsOpen() && g_openingHotkeyCaptureActive.load();
     }
 
     bool CaptureMenuFrameworkOpeningHotkey(const std::uint32_t scanCode,
@@ -3934,7 +3925,7 @@ namespace UHI
 
     bool IsMenuFrameworkModalInputActive() noexcept
     {
-        return g_modalInputActive.load();
+        return NativeImGuiHost::IsOpen() && g_modalInputActive.load();
     }
 
     bool IsMenuFrameworkEscapeCloseSuppressed() noexcept
@@ -3953,7 +3944,7 @@ namespace UHI
 
     bool IsMenuFrameworkBindingCaptureActive() noexcept
     {
-        return g_bindingCaptureActive.load();
+        return NativeImGuiHost::IsOpen() && g_bindingCaptureActive.load();
     }
 
     bool CaptureMenuFrameworkBindingInput(const std::string_view device,
