@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(UniversalHotkeyManager VERSION 1.0.8 LANGUAGES CXX)
+project(UniversalHotkeyManager VERSION 1.0.9 LANGUAGES CXX)
 
 find_package(ZLIB REQUIRED)
 find_package(lz4 CONFIG REQUIRED)
@@ -77,6 +77,9 @@ if(UHI_BUILD_SKSE)
         add_executable(uhi_native_font_tests tests/NativeFontAtlasTests.cpp)
         target_include_directories(uhi_native_font_tests PRIVATE include)
         target_link_libraries(uhi_native_font_tests PRIVATE imgui::imgui User32 Gdi32)
+        add_executable(uhi_native_menu_popup_tests tests/NativeMenuPopupTests.cpp)
+        target_include_directories(uhi_native_menu_popup_tests PRIVATE include)
+        target_link_libraries(uhi_native_menu_popup_tests PRIVATE imgui::imgui)
     endif()
     add_commonlibsse_plugin(UniversalHotkeyManager
         NAME "Universal Hotkey Manager for Skyrim SE-AE"
@@ -107,6 +110,7 @@ if(UHI_BUILD_TESTS)
     add_test(NAME uhi_native_menu_lifecycle_tests COMMAND uhi_native_menu_lifecycle_tests)
     if(TARGET uhi_native_font_tests)
         add_test(NAME uhi_native_font_tests COMMAND uhi_native_font_tests)
+        add_test(NAME uhi_native_menu_popup_tests COMMAND uhi_native_menu_popup_tests)
     endif()
     add_executable(uhi_forum_regression_tests tests/ForumRegressionTests.cpp)
     target_link_libraries(uhi_forum_regression_tests PRIVATE uhi_core)

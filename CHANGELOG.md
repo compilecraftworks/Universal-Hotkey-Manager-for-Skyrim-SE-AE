@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.9 - 2026-09-19
+
+- Fix the crash introduced in 1.0.8 when opening UHM for the first time. Popup cleanup now safely handles an empty popup stack instead of reading its nonexistent first entry.
+- Preserve the 1.0.8 mouse-wheel and menu-close fixes, including cleanup of stale input and popups on reopening.
+- Add regression tests using the actual ImGui library for first opening, empty cleanup, modal/nested/unsubmitted popups and 100 reopen cycles. The original access violation was reproduced locally; the clean SE/AE build and all 26 automated tests passed. In-game confirmation is still needed.
+
 ## 1.0.8 - 2026-09-18
 
 - Fix stale menu visibility that could keep consuming mouse-wheel input after UHM closed, preventing character camera zoom until a save reload. Rendering no longer owns a separate open-state flag, and closing menus cannot render or queue another cursor show.

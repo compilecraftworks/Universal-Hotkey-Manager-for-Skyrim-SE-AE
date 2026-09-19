@@ -3,6 +3,7 @@
 #include "UHI/OpeningHotkey.h"
 #include "UHI/NativeFontAtlas.h"
 #include "UHI/NativeMenuLifecycle.h"
+#include "UHI/NativeMenuPopupReset.h"
 
 #include <RE/R/Renderer.h>
 #include <REL/Relocation.h>
@@ -12,7 +13,6 @@
 #include <d3d11.h>
 #include <dxgi.h>
 #include <imgui.h>
-#include <imgui_internal.h>
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 
@@ -533,7 +533,7 @@ namespace
                 ImGui::GetIO().AddMouseWheelEvent(0.0F, static_cast<float>(wheelSteps));
             }
             ImGui::NewFrame();
-            if (resetInput) ImGui::ClosePopupToLevel(0, false);
+            if (resetInput) UHI::ResetNativeMenuPopups();
             if (g_renderCallback) g_renderCallback();
             ImGui::Render();
             ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
