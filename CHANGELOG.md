@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 - 2026-09-19
+
+- Fix save-file deletion incorrectly putting UHM into a loading state that blocked scans and binding changes until another load.
+- Identify JSON/JSONC settings by their full object/array path. Preserve separate actions with identical key names and bindings, edit the selected setting after formatting changes, and restore its individual backup. Refuse stale writes into comments or unrelated string values.
+- Verify asynchronous MCM handler completion and the resulting live value before recording a successful live change. Keep existing direct-property and file-only editing paths, with clear refresh/pending/unconfirmed notices. A finished but unsuccessful live remap restores its linked document; an unfinished timed-out handler is reported as unconfirmed without racing it with a rollback.
+- Release pending MCM state on completion, timeout or game load. Weak callbacks retain no operation or Papyrus object, and late results cannot close a different editor. Reuse the existing maintenance loop instead of creating a waiting thread for every edit.
+- Add the three missing Chinese UI characters to the Windows font atlas. Preserve the current font choices and compact character range.
+- Retain 1.0.9 binding history while refreshing old scan caches. Expand regression coverage for precise editing, backup compatibility, MCM completion/lifetime and all Chinese/Korean UI text. Escape checks now run in release builds too.
+
 ## 1.0.9 - 2026-09-19
 
 - Fix the crash introduced in 1.0.8 when opening UHM for the first time. Popup cleanup now safely handles an empty popup stack instead of reading its nonexistent first entry.

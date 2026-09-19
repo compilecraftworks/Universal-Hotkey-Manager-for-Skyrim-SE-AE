@@ -116,6 +116,8 @@ namespace UHI
             }
             identity.push_back(separator);
             identity.append(std::to_string(record.evidenceLine)).push_back(separator);
+            identity.append(record.settingName).push_back(separator);
+            identity.append(record.settingSection).push_back(separator);
             identity.append(std::to_string(static_cast<std::uint32_t>(record.stage)));
             return identity;
         }

@@ -11,13 +11,13 @@ namespace UHI::Writers
     {
     public:
         [[nodiscard]] std::optional<std::string> ReadBinding(const std::filesystem::path& path,
-            std::size_t lineNumber, std::string_view settingName) const;
+            std::size_t lineNumber, std::string_view settingName, std::string_view settingSection = {}) const;
         // Replaces one already-scanned scalar/array value while preserving the
-        // file's surrounding syntax. The setting name, line and previous raw
-        // value must all still match, preventing a stale UI row from changing
-        // the wrong option. The first successful change creates .uhi.bak.
+        // file's surrounding syntax. JSON records use a "json:" pointer in
+        // settingSection; legacy records require a unique name on the line.
+        // The previous value must still match. The first change creates .uhi.bak.
         [[nodiscard]] bool SetBinding(const std::filesystem::path& path,
             std::size_t lineNumber, std::string_view settingName,
-            std::string_view expectedRaw, std::string_view newRaw) const;
+            std::string_view expectedRaw, std::string_view newRaw, std::string_view settingSection = {}) const;
     };
 }

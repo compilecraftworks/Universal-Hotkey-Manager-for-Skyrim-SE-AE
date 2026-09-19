@@ -68,8 +68,18 @@ namespace UHI
         if (!result.standard) result.standard = add(L"segoeui.ttf", atlas.GetGlyphRangesDefault(), false);
         if (!result.standard) result.standard = atlas.AddFontDefault();
         add(L"malgun.ttf", atlas.GetGlyphRangesKorean(), true);
-        add(L"msyh.ttc", atlas.GetGlyphRangesChineseSimplifiedCommon(), true);
-        add(L"msjh.ttc", atlas.GetGlyphRangesChineseSimplifiedCommon(), true);
+        // Keep the existing compact atlas and add the UI's three missing
+        // characters. The ranges must outlive ImGui's deferred atlas builds.
+        static const auto chineseRanges = [] {
+            ImFontGlyphRangesBuilder builder;
+            builder.AddRanges(ImGui::GetIO().Fonts->GetGlyphRangesChineseSimplifiedCommon());
+            builder.AddText("拟浏辑");
+            ImVector<ImWchar> ranges;
+            builder.BuildRanges(&ranges);
+            return ranges;
+        }();
+        add(L"msyh.ttc", chineseRanges.Data, true);
+        add(L"msjh.ttc", chineseRanges.Data, true);
         result.valid = atlas.Build() && atlas.TexWidth > 0 && atlas.TexHeight > 0 &&
             atlas.TexWidth <= 16384 && atlas.TexHeight <= 16384;
         return result;

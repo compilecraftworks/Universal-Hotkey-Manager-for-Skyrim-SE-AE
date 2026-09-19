@@ -52,7 +52,7 @@ namespace UHI
         auto backup = record.evidencePath;
         backup += ".uhi.bak";
         if (record.detector != "ControlMapScanner")
-            return Writers::ConfigFileWriter{}.ReadBinding(backup, record.evidenceLine, record.settingName);
+            return Writers::ConfigFileWriter{}.ReadBinding(backup, record.evidenceLine, record.settingName, record.settingSection);
         std::ifstream input(backup);
         std::string line;
         for (std::size_t i = 0; i < record.evidenceLine; ++i)

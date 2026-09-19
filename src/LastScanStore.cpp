@@ -227,7 +227,10 @@ namespace UHI
             std::array<char, kMagic.size()> magic{};
             std::uint32_t schema{}, count{};
             input.read(magic.data(), static_cast<std::streamsize>(magic.size()));
-            if (!input || magic != kMagic || !Read(input, schema) || schema != kSchemaVersion ||
+            // v12 changes detection semantics, not the serialized record. Keep
+            // v11 binding history readable while invalidating stale scan views.
+            if (!input || magic != kMagic || !Read(input, schema) ||
+                (schema != kSchemaVersion && !(schema == 11 && !validateFingerprints)) ||
                 !Read(input, count) || count > Registry::kDefaultMaxRecords) return std::nullopt;
             std::vector<HotkeyRecord> records;
             records.reserve(count);

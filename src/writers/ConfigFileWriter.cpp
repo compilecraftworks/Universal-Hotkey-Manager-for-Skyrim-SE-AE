@@ -1,4 +1,5 @@
 #include "UHI/writers/ConfigFileWriter.h"
+#include "UHI/JsonConfigDocument.h"
 
 #include <algorithm>
 #include <cctype>
@@ -63,9 +64,25 @@ namespace
 
     bool ReplaceValue(std::string& content, const std::size_t lineNumber,
         const std::string_view settingName, const std::string_view expectedRaw,
-        const std::string_view newRaw, const bool jsonSyntax, std::string* readValue = nullptr)
+        const std::string_view newRaw, const bool jsonSyntax, const std::string_view settingSection,
+        std::string* readValue = nullptr)
     {
         if (lineNumber == 0 || settingName.empty()) return false;
+        if (jsonSyntax) {
+            const UHI::JsonConfigDocument document(content);
+            const auto locator = settingSection.starts_with("json:") ? settingSection.substr(5) : std::string_view{};
+            const auto* member = document.Find(settingName, lineNumber, locator);
+            if (!member) return false;
+            const auto current = Trim(std::string_view(content).substr(member->begin, member->end - member->begin));
+            if (readValue) { *readValue = current; return true; }
+            if (current != Trim(expectedRaw)) return false;
+            // Validate the result as well, before touching the original file.
+            auto replacement = content;
+            replacement.replace(member->begin, member->end - member->begin, newRaw);
+            if (!UHI::JsonConfigDocument(replacement).Valid()) return false;
+            content = std::move(replacement);
+            return true;
+        }
         std::size_t lineStart{};
         for (std::size_t line = 1; line < lineNumber; ++line) {
             lineStart = content.find('\n', lineStart);
@@ -75,9 +92,21 @@ namespace
         auto lineEnd = content.find('\n', lineStart);
         if (lineEnd == std::string::npos) lineEnd = content.size();
 
+        // INI/TOML/YAML assignments begin at the first non-space token, not
+        // inside a comment or the string value of an unrelated setting.
+        auto first = content.find_first_not_of(" \t\r", lineStart);
+        if (first == 0 && content.starts_with("\xEF\xBB\xBF")) first = content.find_first_not_of(" \t\r", 3);
+        if (first >= lineEnd) return false;
+        if (content.compare(first, 2, "- ") == 0) first = content.find_first_not_of(" \t", first + 2);
+        if (first >= lineEnd || content[first] == ';' || content[first] == '#' ||
+            content.compare(first, 2, "//") == 0) return false;
+        if (content[first] == '"' || content[first] == '\'') ++first;
+        if (content.compare(first, settingName.size(), settingName) != 0) return false;
+
         auto namePosition = lineStart;
         while ((namePosition = content.find(settingName, namePosition)) != std::string::npos &&
                namePosition < lineEnd) {
+            if (namePosition != first) return false;
             const auto nameEnd = namePosition + settingName.size();
             const bool leftBoundary = namePosition == lineStart ||
                 !IdentifierCharacter(static_cast<unsigned char>(content[namePosition - 1U]));
@@ -137,8 +166,7 @@ namespace
                 return true;
             }
             if (Trim(std::string_view(content).substr(valueStart, valueEnd - valueStart)) != Trim(expectedRaw)) {
-                namePosition = nameEnd;
-                continue;
+                return false;
             }
             content.replace(valueStart, valueEnd - valueStart, newRaw);
             return true;
@@ -150,7 +178,7 @@ namespace
 namespace UHI::Writers
 {
     std::optional<std::string> ConfigFileWriter::ReadBinding(const std::filesystem::path& path,
-        const std::size_t lineNumber, const std::string_view settingName) const
+        const std::size_t lineNumber, const std::string_view settingName, const std::string_view settingSection) const
     {
         std::error_code error;
         if (!std::filesystem::is_regular_file(path, error) || error ||
@@ -163,12 +191,12 @@ namespace UHI::Writers
         auto extension = syntaxPath.extension().string();
         std::ranges::transform(extension, extension.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (content.find('\0') != std::string::npos || !ReplaceValue(content, lineNumber, settingName,
-                {}, {}, extension == ".json" || extension == ".jsonc", &result)) return std::nullopt;
+                {}, {}, extension == ".json" || extension == ".jsonc", settingSection, &result)) return std::nullopt;
         return ValidReplacement(result) ? std::optional<std::string>(result) : std::nullopt;
     }
     bool ConfigFileWriter::SetBinding(const std::filesystem::path& path,
         const std::size_t lineNumber, const std::string_view settingName,
-        const std::string_view expectedRaw, const std::string_view newRaw) const
+        const std::string_view expectedRaw, const std::string_view newRaw, const std::string_view settingSection) const
     {
         if (!ValidReplacement(newRaw)) return false;
         std::error_code error;
@@ -184,7 +212,7 @@ namespace UHI::Writers
         });
         const bool jsonSyntax = extension == ".json" || extension == ".jsonc";
         if (content.find('\0') != std::string::npos ||
-            !ReplaceValue(content, lineNumber, settingName, expectedRaw, newRaw, jsonSyntax)) return false;
+            !ReplaceValue(content, lineNumber, settingName, expectedRaw, newRaw, jsonSyntax, settingSection)) return false;
 
         auto backup = path;
         backup += ".uhi.bak";

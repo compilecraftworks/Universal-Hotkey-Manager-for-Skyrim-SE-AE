@@ -1,4 +1,5 @@
 #include "UHI/scanners/GenericConfigScanner.h"
+#include "UHI/JsonConfigDocument.h"
 #include "UHI/ConfigBindingParser.h"
 #include "UHI/TextDecoder.h"
 #include "UHI/GameFilePolicy.h"
@@ -880,6 +881,9 @@ namespace UHI::Scanners
         const bool dedicatedFile = IsDedicatedBindingName(UHI::PathToUtf8(source.stem()));
         if (!dedicatedFile && !MayContainBinding(utf8Content)) return results;
         const auto extension = Lower(UHI::PathToUtf8(source.extension()));
+        const bool json = extension == ".json" || extension == ".jsonc";
+        const std::optional<JsonConfigDocument> jsonDocument = json ?
+            std::optional<JsonConfigDocument>(std::in_place, utf8Content) : std::nullopt;
         const ConfigBindingScope scopes(utf8Content, extension == ".yaml" || extension == ".yml");
         auto documentCodeSpace = InferContextCodeSpace(utf8Content.substr(0, 4096));
         // A dedicated native hotkey document can use Windows VK even under
@@ -951,7 +955,10 @@ namespace UHI::Scanners
             const auto activation = InferActivationContext(
                 std::string(context) + " " + key, ContextEvidenceSource::structuredConfiguration);
             const auto line = LineAt(utf8Content, offset);
-            const auto identity = key + '\x1F' + parsed.binding + '\x1F' + std::to_string(line);
+            const auto* jsonMember = jsonDocument ? jsonDocument->At(offset, key) : nullptr;
+            if (jsonDocument && jsonDocument->Valid() && !jsonMember) return;
+            const auto section = jsonMember ? "json:" + jsonMember->locator : NearbySection(utf8Content, offset);
+            const auto identity = key + '\x1F' + parsed.binding + '\x1F' + std::to_string(offset);
             if (!seen.insert(identity).second) return;
             results.push_back({
                 .owner = owner,
@@ -959,7 +966,7 @@ namespace UHI::Scanners
                 .binding = parsed.binding,
                 .rawBinding = raw,
                 .settingName = key,
-                .settingSection = NearbySection(utf8Content, offset),
+                .settingSection = section,
                 .codeSystem = parsed.codeSystem,
                 .device = parsed.device,
                 .detector = "StructuredConfigScanner",
@@ -967,7 +974,7 @@ namespace UHI::Scanners
                 .evidencePath = source,
                 .evidenceLine = line,
                 .stage = ScanStage::configuration,
-                .editable = IsDirectlyEditableConfig(source),
+                .editable = IsDirectlyEditableConfig(source) && (!jsonDocument || jsonMember),
                 .runtimeActive = IsEffectiveRuntimeConfig(source),
                 .conflictEligible = parsed.conflictEligible,
                 .contextMask = activation.mask,

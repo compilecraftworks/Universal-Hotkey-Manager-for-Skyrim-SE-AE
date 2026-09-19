@@ -146,6 +146,7 @@ namespace
     std::atomic_int g_bindingWriteResult{ 0 };  // 0 waiting/none, 1 success, 2 failure
     std::mutex g_bindingWriteResultMutex;
     std::string g_bindingWriteResultMessage;
+    std::uint64_t g_bindingWriteRevision{}; // guarded by g_bindingWriteResultMutex
     int g_bindingCaptureArmedFrame{ -1 };
     int g_openingHotkeyCaptureArmedFrame{ -1 };
     int g_editorPopupOpenNotBeforeFrame{ -1 };
@@ -161,7 +162,13 @@ namespace
         none,
         gameSaveRequired,
         documentRolledBack,
-        documentRollbackUnverified
+        documentRollbackUnverified,
+        documentOnly,
+        propertyRefreshRequired,
+        pending,
+        applied,
+        timedOut,
+        notApplied
     };
     std::atomic_int g_pendingBindingWriteNotice{};
     BindingWriteNotice g_visibleBindingWriteNotice{ BindingWriteNotice::none };
@@ -349,10 +356,11 @@ namespace
         g_bindingCaptureDisplay.clear();
         g_bindingCaptureRaw.clear();
         g_bindingCaptureStatus.clear();
-        g_bindingWritePending = false;
-        g_bindingWriteResult = 0;
         {
             std::scoped_lock resultLock(g_bindingWriteResultMutex);
+            ++g_bindingWriteRevision;
+            g_bindingWritePending = false;
+            g_bindingWriteResult = 0;
             g_bindingWriteResultMessage.clear();
         }
         g_openRenamePopup = false;
@@ -429,10 +437,11 @@ namespace
         g_bindingCaptureDisplay = FriendlyBindingLabel(record.binding);
         g_bindingCaptureRaw.clear();
         g_bindingCaptureStatus.clear();
-        g_bindingWritePending = false;
-        g_bindingWriteResult = 0;
         {
             std::scoped_lock resultLock(g_bindingWriteResultMutex);
+            ++g_bindingWriteRevision;
+            g_bindingWritePending = false;
+            g_bindingWriteResult = 0;
             g_bindingWriteResultMessage.clear();
         }
         g_focusRenameField = false;
@@ -2806,6 +2815,11 @@ namespace
                             "단축키 저장기가 준비되지 않았습니다. 값은 변경되지 않았습니다.",
                             "快捷键写入器不可用，未修改任何值。");
                     } else {
+                        std::uint64_t revision{};
+                        {
+                            std::scoped_lock resultLock(g_bindingWriteResultMutex);
+                            revision = ++g_bindingWriteRevision;
+                        }
                         g_bindingWritePending = true;
                         g_bindingWriteResult = 0;
                         g_bindingCaptureStatus = UiText(
@@ -2813,7 +2827,8 @@ namespace
                             "원본 값을 저장하고 활성 MCM을 동기화하는 중입니다...",
                             "正在保存源值并同步当前 MCM...");
                         writer(record, g_bindingCaptureRaw,
-                            [](const bool success, std::string message) {
+                            [revision](const bool success, std::string message) {
+                                std::scoped_lock resultLock(g_bindingWriteResultMutex);
                                 BindingWriteNotice notice{ BindingWriteNotice::none };
                                 if (message == "UHM_MCM_GAME_SAVE_REQUIRED") {
                                     notice = BindingWriteNotice::gameSaveRequired;
@@ -2821,11 +2836,28 @@ namespace
                                     notice = BindingWriteNotice::documentRolledBack;
                                 } else if (message == "UHM_MCM_DOCUMENT_ROLLBACK_UNVERIFIED") {
                                     notice = BindingWriteNotice::documentRollbackUnverified;
+                                } else if (message == "UHM_MCM_DOCUMENT_ONLY") {
+                                    notice = BindingWriteNotice::documentOnly;
+                                } else if (message == "UHM_MCM_PROPERTY_REFRESH_REQUIRED") {
+                                    notice = BindingWriteNotice::propertyRefreshRequired;
+                                } else if (message == "UHM_MCM_PENDING") {
+                                    notice = BindingWriteNotice::pending;
+                                } else if (message == "UHM_MCM_APPLIED") {
+                                    notice = BindingWriteNotice::applied;
+                                } else if (message == "UHM_MCM_TIMEOUT" || message == "UHM_MCM_UNCONFIRMED") {
+                                    notice = BindingWriteNotice::timedOut;
+                                } else if (message == "UHM_MCM_NOT_APPLIED") {
+                                    notice = BindingWriteNotice::notApplied;
                                 }
-                                {
-                                    std::scoped_lock resultLock(g_bindingWriteResultMutex);
-                                    g_bindingWriteResultMessage = std::move(message);
+                                if (revision != g_bindingWriteRevision) {
+                                    // A result belongs to the saved operation,
+                                    // not whichever editor is now open. Publish
+                                    // its notice without closing that editor.
+                                    if (notice != BindingWriteNotice::none && notice != BindingWriteNotice::pending)
+                                        g_pendingBindingWriteNotice.store(static_cast<int>(notice));
+                                    return;
                                 }
+                                g_bindingWriteResultMessage = std::move(message);
                                 g_bindingWritePending = false;
                                 if (notice != BindingWriteNotice::none) {
                                     g_pendingBindingWriteNotice.store(static_cast<int>(notice));
@@ -3099,6 +3131,43 @@ namespace
             const char* message{};
             ImVec4 messageColor(0.98F, 0.99F, 1.0F, 1.0F);
             switch (g_visibleBindingWriteNotice) {
+            case BindingWriteNotice::pending:
+                message = UiText(
+                    "MCM change requested.\nClose UHM to let the mod finish.\nThe result will appear here.",
+                    "MCM 변경을 요청했습니다.\nUHM을 닫으면 모드가 처리합니다.\n결과는 이곳에 표시됩니다.",
+                    "已请求更改 MCM。\n请关闭 UHM 以完成处理。\n结果将在此显示。");
+                break;
+            case BindingWriteNotice::applied:
+                message = UiText("The hotkey was saved.\nIts live MCM value was verified.",
+                    "단축키가 저장되었습니다.\n현재 MCM 값도 확인했습니다.", "快捷键已保存。\n已确认当前 MCM 值已更新。");
+                break;
+            case BindingWriteNotice::timedOut:
+                message = UiText(
+                    "MCM result is unconfirmed; it may\nfinish later. Files keep the new value.\nCheck the mod's MCM and rescan.",
+                    "MCM 적용이 늦게 완료될 수 있습니다.\n수정된 파일은 새 값을 유지합니다.\n모드 MCM 확인 후 다시 스캔하세요.",
+                    "MCM 结果尚未确认，可能稍后完成。\n已修改的文件保留新值。\n请检查模组 MCM 并重新扫描。");
+                messageColor = ImVec4(1.0F, 0.72F, 0.28F, 1.0F);
+                break;
+            case BindingWriteNotice::notApplied:
+                message = UiText(
+                    "The requested MCM value was not set.\nNo successful live change was recorded.\nCheck the mod's MCM and rescan.",
+                    "요청한 MCM 값이 적용되지 않았습니다.\n적용 성공 이력은 기록하지 않았습니다.\n모드 MCM 확인 후 다시 스캔하세요.",
+                    "请求的 MCM 值未应用。\n未记录成功的实时更改。\n请检查模组 MCM 并重新扫描。");
+                messageColor = ImVec4(1.0F, 0.72F, 0.28F, 1.0F);
+                break;
+            case BindingWriteNotice::documentOnly:
+                message = UiText(
+                    "The settings file was saved.\nLive MCM application is unconfirmed.\nCheck its MCM or restart, then rescan.",
+                    "설정 파일을 저장했습니다.\n현재 MCM 적용은 확인되지 않았습니다.\nMCM 확인 또는 재시작 후 스캔하세요.",
+                    "设置文件已保存。\n当前 MCM 应用尚未确认。\n请检查 MCM 或重启后重新扫描。");
+                messageColor = ImVec4(1.0F, 0.72F, 0.28F, 1.0F);
+                break;
+            case BindingWriteNotice::propertyRefreshRequired:
+                message = UiText(
+                    "The MCM value was updated.\nReopen its MCM page to refresh keys.\nSave the game to keep the value.",
+                    "MCM 값이 변경되었습니다.\nMCM 페이지를 다시 열어 갱신하세요.\n값을 유지하려면 게임을 저장하세요.",
+                    "MCM 值已更新。\n请重新打开 MCM 页面以更新按键。\n请保存游戏以保留更新后的值。");
+                break;
             case BindingWriteNotice::gameSaveRequired:
                 message = UiText(
                     "The Papyrus/MCM hotkey is active in the current game.\nSave the game to keep it after the next load.",

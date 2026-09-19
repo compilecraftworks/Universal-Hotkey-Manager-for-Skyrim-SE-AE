@@ -48,6 +48,8 @@ namespace UHI
     // values are changed on the game thread while document/controlmap values
     // keep using their exact source serializer.  Completion may be invoked
     // asynchronously and must not call ImGui directly.
+    // MCM writes may first report (false, "UHM_MCM_PENDING") as progress,
+    // then deliver their verified final result. Progress is never a saved edit.
     using BindingWriteCompletion = std::function<void(bool, std::string)>;
     using BindingWriter = std::function<void(HotkeyRecord, std::string, BindingWriteCompletion)>;
     void SetMenuFrameworkBindingWriter(BindingWriter writer);

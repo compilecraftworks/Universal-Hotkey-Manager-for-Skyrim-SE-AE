@@ -1,6 +1,8 @@
 #include "UHI/BindingInputCapture.h"
 #include "UHI/BindingHistory.h"
 #include "UHI/McmBindingMatch.h"
+#include "UHI/McmWriteReceipt.h"
+#include "UHI/GameTransition.h"
 #include "UHI/JsonReporter.h"
 #include "UHI/Registry.h"
 #include "UHI/ScanPipeline.h"
@@ -541,6 +543,8 @@ namespace
         return process == GetCurrentProcessId();
     }
 
+    void PumpBindingWrites();
+
     void StartOpeningHotkeyPoll()
     {
         if (g_openingHotkeyPollStarted.exchange(true)) return;
@@ -550,6 +554,7 @@ namespace
                 bool wasDown = false;
                 std::uint32_t previousCode{};
                 for (;;) {
+                    PumpBindingWrites();
                     const auto hotkey = GetOpeningHotkey();
                     const auto virtualKey = ScanCodeToVirtualKey(hotkey.scanCode);
                     if (hotkey.scanCode != previousCode) {
@@ -917,8 +922,24 @@ namespace
         return !ambiguous && bestScore >= 80 ? best : std::nullopt;
     }
 
+    class McmCompletionCallback final : public RE::BSScript::IStackCallbackFunctor
+    {
+    public:
+        explicit McmCompletionCallback(std::weak_ptr<UHI::McmWriteReceipt> receipt) : receipt_(std::move(receipt)) {}
+        void operator()(RE::BSScript::Variable) override
+        {
+            if (const auto receipt = receipt_.lock()) receipt->handlerCompleted = true;
+        }
+        void SetObject(const RE::BSTSmartPointer<RE::BSScript::Object>&) override {}
+    private:
+        // The VM must not keep a UHM operation or script object alive after a
+        // timeout/load. A late callback can only update its still-live receipt.
+        std::weak_ptr<UHI::McmWriteReceipt> receipt_;
+    };
+
     bool ChangeRegisteredMcmHotkey(const UHI::HotkeyRecord& record, const std::int32_t keyCode,
-        std::string& detail)
+        std::string& detail, const std::shared_ptr<UHI::McmWriteReceipt>& receipt = {},
+        bool* queued = nullptr, std::optional<std::int32_t>* observed = nullptr)
     {
         try {
             auto* vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
@@ -1061,6 +1082,10 @@ namespace
                 return false;
             }
             auto& target = targets.front();
+            if (observed) {
+                *observed = target.oldValue;
+                return true;
+            }
             if (record.detector == "PapyrusRuntimeProperty") {
                 const auto expected = ParseSingleMcmKeyCode(record.rawBinding);
                 if (!expected || target.oldValue != *expected) {
@@ -1071,11 +1096,11 @@ namespace
             const auto section = CanonicalMcmIdentifier(record.settingSection);
             bool dispatched{};
             if (section.contains("addkeymapoptionst") || section.contains("keymapoptionst")) {
-                RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> result;
+                RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> result{ new McmCompletionCallback(receipt) };
                 dispatched = vm->DispatchMethodCall(target.configRoot, "OnKeyMapChangeST",
                     RE::MakeFunctionArguments(std::int32_t{ keyCode }, RE::BSFixedString{}, RE::BSFixedString{}), result);
             } else if (const auto optionId = FindMcmOptionId(target.configRoot, record)) {
-                RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> result;
+                RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> result{ new McmCompletionCallback(receipt) };
                 dispatched = vm->DispatchMethodCall(target.configRoot, "OnOptionKeyMapChange",
                     RE::MakeFunctionArguments(std::int32_t{ *optionId }, std::int32_t{ keyCode },
                         RE::BSFixedString{}, RE::BSFixedString{}), result);
@@ -1089,7 +1114,8 @@ namespace
                 else return false;
                 detail = "The active MCM value was updated; the mod will refresh its key registration when its MCM/page reloads.";
             } else {
-                detail = "The mod's MCM remap handler accepted the new key.";
+                if (queued) *queued = true;
+                detail = "Waiting for the mod's MCM remap handler to finish.";
             }
             SKSE::log::info("Changed live MCM binding {} / {} from {} to {} ({})",
                 record.owner, target.name, target.oldValue, keyCode, dispatched ? "handler" : "property");
@@ -1843,6 +1869,99 @@ namespace
         });
     }
 
+    struct PendingMcmWrite
+    {
+        UHI::HotkeyRecord record;
+        std::int32_t requested{};
+        std::shared_ptr<UHI::McmWriteReceipt> receipt;
+        std::optional<UHI::HotkeyRecord> document;
+        std::string documentRaw;
+        bool requireLive{};
+        UHI::BindingWriteCompletion finish;
+    };
+    // Game tasks and pre-load messages serialize access to the operation. The
+    // existing hotkey poll thread only schedules one maintenance task at a time.
+    std::optional<PendingMcmWrite> g_pendingMcmWrite;
+    std::mutex g_pendingMcmMutex;
+    std::atomic_bool g_mcmWritePending{ false };
+    std::atomic_bool g_bindingMaintenanceQueued{ false };
+    std::atomic_uint64_t g_bindingRescanDue{ 0 };
+
+    void FinishPendingMcmWrite(bool cancelled = false)
+    {
+        std::scoped_lock lock(g_pendingMcmMutex);
+        if (!g_pendingMcmWrite) return;
+        auto& pending = *g_pendingMcmWrite;
+        std::optional<std::int32_t> actual;
+        if (!cancelled && pending.receipt->handlerCompleted.load()) {
+            std::string detail;
+            // Re-resolve the property on the game thread; no raw VM pointer is
+            // retained across a frame or a save-load boundary.
+            ChangeRegisteredMcmHotkey(pending.record, pending.requested, detail, {}, nullptr, &actual);
+        }
+        using Outcome = UHI::McmWriteReceipt::Outcome;
+        const auto outcome = cancelled ? Outcome::rejected :
+            pending.receipt->Inspect(GetTickCount64(), actual, pending.requested);
+        if (outcome == Outcome::waiting) return;
+        auto operation = std::move(pending);
+        g_pendingMcmWrite.reset();
+        g_mcmWritePending = false;
+        if (cancelled) {
+            // A callback may have completed just before the pre-load message.
+            // Do not revert its document without inspecting the now-transitioning
+            // VM. Retire our state and report uncertainty, as for a timeout.
+            operation.finish(false, "UHM_MCM_UNCONFIRMED");
+        } else if (outcome == Outcome::applied) {
+            operation.finish(true, operation.requireLive && !operation.document ?
+                "UHM_MCM_GAME_SAVE_REQUIRED" : "UHM_MCM_APPLIED");
+        } else if (!operation.requireLive) {
+            // A loose file remains a valid persistent edit when its optional
+            // runtime mirror does not apply it. Preserve that existing behavior.
+            operation.finish(true, "UHM_MCM_DOCUMENT_ONLY");
+        } else if (outcome == Outcome::timedOut) {
+            // Papyrus dispatch cannot be cancelled. Rolling back while it is
+            // still running could undo a later successful change on disk only.
+            operation.finish(false, "UHM_MCM_TIMEOUT");
+        } else if (operation.document) {
+            const auto& document = *operation.document;
+            const bool restored = UHI::Writers::ConfigFileWriter{}.SetBinding(document.evidencePath,
+                document.evidenceLine, document.settingName, operation.documentRaw,
+                document.rawBinding, document.settingSection);
+            operation.finish(false, restored ? "UHM_MCM_DOCUMENT_ROLLED_BACK" : "UHM_MCM_DOCUMENT_ROLLBACK_UNVERIFIED");
+        } else {
+            operation.finish(false, "UHM_MCM_NOT_APPLIED");
+        }
+    }
+
+    void PumpBindingWrites()
+    {
+        if (!g_mcmWritePending.load() && g_bindingRescanDue.load() == 0) return;
+        static std::uint64_t nextPoll{}; // accessed only by the existing poll thread
+        const auto now = GetTickCount64();
+        if (now < nextPoll || g_bindingMaintenanceQueued.exchange(true)) return;
+        nextPoll = now + 100;
+        if (const auto* tasks = SKSE::GetTaskInterface()) {
+            tasks->AddTask([] {
+                try {
+                    FinishPendingMcmWrite(g_gameTransitioning.load());
+                    const auto due = g_bindingRescanDue.load();
+                    if (due != 0 && GetTickCount64() >= due) {
+                        g_bindingRescanDue = 0;
+                        if (!g_gameTransitioning.load()) StartScan(false);
+                    }
+                } catch (const std::exception& error) {
+                    SKSE::log::error("MCM write verification failed: {}", error.what());
+                    std::scoped_lock lock(g_pendingMcmMutex);
+                    auto failed = std::move(g_pendingMcmWrite);
+                    g_pendingMcmWrite.reset();
+                    g_mcmWritePending = false;
+                    if (failed) failed->finish(false, "UHM_MCM_NOT_APPLIED");
+                }
+                g_bindingMaintenanceQueued = false;
+            });
+        } else g_bindingMaintenanceQueued = false;
+    }
+
     void QueueBindingWrite(UHI::HotkeyRecord record, std::string newRaw,
         UHI::BindingWriteCompletion completion)
     {
@@ -1853,12 +1972,25 @@ namespace
         }
         tasks->AddTask([record = std::move(record), newRaw = std::move(newRaw),
                            completion = std::move(completion)]() mutable {
+            std::scoped_lock pendingLock(g_pendingMcmMutex);
             bool sourceWritten{};
             bool runtimeWritten{};
             std::string detail;
+            const auto finish = [record, newRaw, completion](bool success, std::string message) {
+                if (success && !UHI::SaveBindingChange(LastScanPath().parent_path() / "binding-history-v1.bin", record, newRaw))
+                    SKSE::log::warn("Could not save binding history; this change will not appear in the Backups tab");
+                if (completion) completion(success, std::move(message));
+                g_bindingRescanDue = GetTickCount64() + 350;
+            };
             try {
                 if (g_gameTransitioning.load()) {
                     if (completion) completion(false, "The game is loading; no value was changed.");
+                    return;
+                }
+                auto writeCodeSystem = record.codeSystem;
+                std::ranges::transform(writeCodeSystem, writeCodeSystem.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                if (g_pendingMcmWrite && (record.detector == "PapyrusRuntimeProperty" || writeCodeSystem.contains("skse unified"))) {
+                    if (completion) completion(false, "A previous MCM change is still being verified. Wait for it to finish before saving another change.");
                     return;
                 }
                 if (record.detector == "PapyrusRuntimeProperty") {
@@ -1885,14 +2017,29 @@ namespace
                         sourceWritten = UHI::Writers::ConfigFileWriter{}.SetBinding(
                             linkedMcmDocument->evidencePath, linkedMcmDocument->evidenceLine,
                             linkedMcmDocument->settingName, linkedMcmDocument->rawBinding,
-                            serialized->raw);
+                            serialized->raw, linkedMcmDocument->settingSection);
                         if (!sourceWritten) {
                             if (completion) completion(false,
                                 "The linked MCM document changed on disk or could not be written; nothing was changed.");
                             return;
                         }
                     }
-                    runtimeWritten = ChangeRegisteredMcmHotkey(record, *keyCode, detail);
+                    auto receipt = std::make_shared<UHI::McmWriteReceipt>();
+                    receipt->deadline = GetTickCount64() + 30'000;
+                    bool queued{};
+                    runtimeWritten = ChangeRegisteredMcmHotkey(record, *keyCode, detail, receipt, &queued);
+                    if (queued) {
+                        const auto serialized = linkedMcmDocument ?
+                            SerializeMcmKeyForLinkedDocument(*linkedMcmDocument, *keyCode) : std::nullopt;
+                        g_pendingMcmWrite = PendingMcmWrite{ record, *keyCode, std::move(receipt), linkedMcmDocument,
+                            serialized ? serialized->raw : std::string{}, true, finish };
+                        g_mcmWritePending = true;
+                        // Close the editor as before, but report only that the
+                        // request is pending. A paused-game handler may need the
+                        // user to close UHM before it can finish.
+                        if (completion) completion(false, "UHM_MCM_PENDING");
+                        return;
+                    }
                     if (!runtimeWritten) {
                         if (sourceWritten) {
                             // Keep a document-backed MCM option atomic.  A
@@ -1907,7 +2054,7 @@ namespace
                             const bool rolledBack = linkedMcmDocument && serialized &&
                                 UHI::Writers::ConfigFileWriter{}.SetBinding(linkedMcmDocument->evidencePath,
                                     linkedMcmDocument->evidenceLine, linkedMcmDocument->settingName,
-                                    serialized->raw, linkedMcmDocument->rawBinding);
+                                    serialized->raw, linkedMcmDocument->rawBinding, linkedMcmDocument->settingSection);
                             sourceWritten = false;
                             SKSE::log::warn("Active MCM remap failed after document write; rollback {}: {}",
                                 rolledBack ? "succeeded" : "could not be verified", detail);
@@ -1922,10 +2069,11 @@ namespace
                     }
                     if (runtimeWritten) {
                         sourceWritten = true;  // The save-backed live property/handler is the source.
+                        detail = "UHM_MCM_PROPERTY_REFRESH_REQUIRED";
                         if (!linkedMcmDocument) {
                             SKSE::log::info("Changed a save-backed Papyrus MCM value without a document source: {}",
                                 detail);
-                            detail = "UHM_MCM_GAME_SAVE_REQUIRED";
+                            detail = "UHM_MCM_PROPERTY_REFRESH_REQUIRED";
                         }
                     }
                 } else if (record.detector == "ControlMapScanner") {
@@ -1934,7 +2082,7 @@ namespace
                         record.action, record.rawBinding);
                 } else {
                     sourceWritten = UHI::Writers::ConfigFileWriter{}.SetBinding(record.evidencePath,
-                        record.evidenceLine, record.settingName, record.rawBinding, newRaw);
+                        record.evidenceLine, record.settingName, record.rawBinding, newRaw, record.settingSection);
                     // MCM Helper and similar document-backed menus often keep
                     // a live mirror of the same SKSE integer.  Synchronize it
                     // opportunistically when the source encoding proves that
@@ -1948,8 +2096,18 @@ namespace
                     if (sourceWritten && codeSystem.contains("skse unified")) {
                         if (const auto keyCode = ParseSingleMcmKeyCode(newRaw)) {
                             std::string runtimeDetail;
-                            runtimeWritten = ChangeRegisteredMcmHotkey(record, *keyCode, runtimeDetail);
-                            if (runtimeWritten) detail = std::move(runtimeDetail);
+                            auto receipt = std::make_shared<UHI::McmWriteReceipt>();
+                            receipt->deadline = GetTickCount64() + 30'000;
+                            bool queued{};
+                            runtimeWritten = ChangeRegisteredMcmHotkey(record, *keyCode, runtimeDetail, receipt, &queued);
+                            if (queued) {
+                                g_pendingMcmWrite = PendingMcmWrite{ record, *keyCode, std::move(receipt), record,
+                                    newRaw, false, finish };
+                                g_mcmWritePending = true;
+                                if (completion) completion(false, "UHM_MCM_PENDING");
+                                return;
+                            }
+                            if (runtimeWritten) detail = "UHM_MCM_PROPERTY_REFRESH_REQUIRED";
                             else SKSE::log::info("Document binding saved; live MCM mirror was unavailable: {}",
                                 runtimeDetail);
                         }
@@ -1960,17 +2118,8 @@ namespace
                         "The source changed or its exact setting could not be written. No value was changed.");
                     return;
                 }
-                if (!UHI::SaveBindingChange(LastScanPath().parent_path() / "binding-history-v1.bin", record, newRaw))
-                    SKSE::log::warn("Could not save binding history; this change will not appear in the Backups tab");
-                if (completion) completion(true, detail.empty() ?
+                finish(true, detail.empty() ?
                     "The hotkey was saved in its original format." : detail);
-                // Papyrus remap handlers are queued by the VM. Give them a
-                // short update window before capturing the new runtime value;
-                // the detached waiter never touches VM objects itself.
-                std::thread([] {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(350));
-                    if (!g_gameTransitioning.load()) StartScan(false);
-                }).detach();
             } catch (const std::exception& error) {
                 SKSE::log::error("Binding write failed safely: {}", error.what());
                 if (completion) completion(false, std::string("The hotkey could not be saved safely: ") + error.what());
@@ -2073,10 +2222,11 @@ namespace
                 UHI::FormatOpeningHotkey(GetOpeningHotkey()), GetOpeningHotkey().enabled,
                 GetModuleHandleW(L"CommunityShaders.dll") != nullptr);
         }
-        if (message->type == SKSE::MessagingInterface::kPreLoadGame ||
-            message->type == SKSE::MessagingInterface::kDeleteGame) {
+        if (UHI::BeginsGameTransition<SKSE::MessagingInterface>(message->type)) {
             g_gameTransitioning = true;
             g_runtimeCaptureReady = false;
+            FinishPendingMcmWrite(true);
+            g_bindingRescanDue = 0;
             CancelScan();
             // Close editor state before the VM and input/menu objects begin
             // reverting.  This also prevents a captured key from leaking into
@@ -2102,6 +2252,10 @@ namespace
             message->type == SKSE::MessagingInterface::kPostLoadGame ||
             message->type == SKSE::MessagingInterface::kNewGame) {
             g_gameTransitioning = false;
+        }
+        if (message->type == SKSE::MessagingInterface::kNewGame) {
+            FinishPendingMcmWrite(true);
+            g_bindingRescanDue = 0;
         }
         if (message->type == SKSE::MessagingInterface::kPostLoadGame ||
             message->type == SKSE::MessagingInterface::kNewGame) {
