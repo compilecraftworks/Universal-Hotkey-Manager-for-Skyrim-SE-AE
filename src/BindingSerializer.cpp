@@ -224,6 +224,22 @@ namespace UHI
 
         const auto system = LowerAscii(record.codeSystem);
         std::string display = modifierDisplay.empty() ? mainDisplay : modifierDisplay + '+' + mainDisplay;
+        constexpr std::string_view separateModifier = " (separate modifier)";
+        if (const auto tag = system.find(separateModifier); tag != std::string::npos) {
+            const auto plus = record.binding.rfind('+');
+            const auto prefix = plus == std::string::npos ? std::string{} : record.binding.substr(0, plus);
+            auto family = modifierDisplay;
+            if (family == "LCtrl" || family == "RCtrl") family = "Ctrl";
+            else if (family == "LShift" || family == "RShift") family = "Shift";
+            else if (family == "LAlt" || family == "RAlt") family = "Alt";
+            if (modifierCode != 0 && prefix != modifierDisplay && prefix != family)
+                return {{}, {}, "This modifier is stored separately. The main key can change while preserving the existing modifier."};
+            auto mainRecord = record;
+            mainRecord.codeSystem.erase(tag, separateModifier.size());
+            auto serialized = SerializeCapturedBinding(mainRecord, mainDevice, mainCode);
+            if (serialized && !prefix.empty()) serialized.display = prefix + '+' + serialized.display;
+            return serialized;
+        }
         if (system.find("symbol") != std::string::npos) {
             const auto mainRaw = SymbolLike(record, mainDevice, mainCode, mainDisplay);
             auto modifierRaw = modifierCode == 0U ? std::string{} :

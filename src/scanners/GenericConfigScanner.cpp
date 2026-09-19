@@ -1,5 +1,6 @@
 #include "UHI/scanners/GenericConfigScanner.h"
 #include "UHI/JsonConfigDocument.h"
+#include "UHI/TextConfigScope.h"
 #include "UHI/ConfigBindingParser.h"
 #include "UHI/TextDecoder.h"
 #include "UHI/GameFilePolicy.h"
@@ -158,7 +159,7 @@ namespace
     bool EnabledModifier(const std::string_view context, const std::string_view name)
     {
         const std::regex expression("[\\\"']?" + std::string(name) +
-            R"([\w.-]*[\"']?\s*[:=]\s*[\"']?(?:true|yes|on|1))", std::regex::icase);
+            R"([\w.-]*[\"']?\s*[:=]\s*[\"']?(?:true|yes|on|1)(?![\w.-]))", std::regex::icase);
         return std::regex_search(context.begin(), context.end(), expression);
     }
 
@@ -822,6 +823,7 @@ namespace UHI::Scanners
             std::string raw;
             std::size_t position{};
             std::string_view context;
+            std::string scope;
         };
         enum class CompoundRole { none, primary, modifier };
         struct CompoundMember
@@ -885,6 +887,15 @@ namespace UHI::Scanners
         const std::optional<JsonConfigDocument> jsonDocument = json ?
             std::optional<JsonConfigDocument>(std::in_place, utf8Content) : std::nullopt;
         const ConfigBindingScope scopes(utf8Content, extension == ".yaml" || extension == ".yml");
+        const bool yaml = extension == ".yaml" || extension == ".yml";
+        const TextConfigScope textScopes(utf8Content, yaml);
+        const auto scopeAt = [&](std::size_t offset, std::string_view key) {
+            if (const auto* member = jsonDocument ? jsonDocument->At(offset, key) : nullptr)
+                return "json:" + member->locator.substr(0, member->locator.rfind('/'));
+            const auto* line = textScopes.At(offset);
+            return "text:" + std::to_string(line ? line->scope : 0);
+        };
+        std::unordered_map<std::string, std::string> modifierContexts;
         auto documentCodeSpace = InferContextCodeSpace(utf8Content.substr(0, 4096));
         // A dedicated native hotkey document can use Windows VK even under
         // Data/SKSE. Require a matching owner DLL and real PE import evidence;
@@ -939,7 +950,11 @@ namespace UHI::Scanners
             // file mentions input, not proof of an active physical shortcut.
             if (!parsed.conflictEligible) return;
             if (fallbackUsed && parsed.conflictEligible) parsed.codeSystem += " (source-convention fallback)";
-            parsed.binding = ApplyModifiers(std::move(parsed.binding), context, source, key);
+            const auto baseBinding = parsed.binding;
+            const auto modifiers = modifierContexts.find(scopeAt(offset, key));
+            parsed.binding = ApplyModifiers(std::move(parsed.binding),
+                offset < content.size() && content[offset] == '<' ? context :
+                    modifiers == modifierContexts.end() ? std::string_view{} : modifiers->second, source, key);
             if (compoundModifiers && !compoundModifiers->empty()) {
                 std::string chord;
                 for (const auto& modifier : *compoundModifiers) {
@@ -950,6 +965,7 @@ namespace UHI::Scanners
                 if (!chord.empty()) parsed.binding = chord + '+' + parsed.binding;
             }
             if (parsed.binding.empty()) return;
+            if (parsed.binding != baseBinding) parsed.codeSystem += " (separate modifier)";
             const auto action = ResolveActionName(actionKey.empty() ? key : std::string(actionKey),
                 context, utf8Content, offset, owner);
             const auto activation = InferActivationContext(
@@ -957,7 +973,9 @@ namespace UHI::Scanners
             const auto line = LineAt(utf8Content, offset);
             const auto* jsonMember = jsonDocument ? jsonDocument->At(offset, key) : nullptr;
             if (jsonDocument && jsonDocument->Valid() && !jsonMember) return;
-            const auto section = jsonMember ? "json:" + jsonMember->locator : NearbySection(utf8Content, offset);
+            const auto* textLine = textScopes.At(offset);
+            const auto section = jsonMember ? "json:" + jsonMember->locator :
+                std::string(textLine ? textLine->section : std::string_view{});
             const auto identity = key + '\x1F' + parsed.binding + '\x1F' + std::to_string(offset);
             if (!seen.insert(identity).second) return;
             results.push_back({
@@ -996,13 +1014,29 @@ namespace UHI::Scanners
             const auto key = match[1].matched ? match[1].str() : match[2].matched ? match[2].str() : match[3].str();
             const auto raw = match[4].matched ? match[4].str() : match[5].matched ? match[5].str() : match[6].str();
             const auto position = static_cast<std::size_t>(match.position());
+            if (jsonDocument && jsonDocument->Valid() && !jsonDocument->At(position, key)) continue;
             if (CommentedAssignment(content, position) ||
                 (!match[4].matched && !match[5].matched && !raw.empty() &&
                     (raw.front() == '{' || raw.front() == '['))) continue;
             const auto contextStart = position > 192 ? position - 192 : 0;
             const auto contextLength = std::min<std::size_t>(512, content.size() - contextStart);
             assignments.push_back({ key, raw, position,
-                std::string_view(content).substr(contextStart, contextLength) });
+                std::string_view(content).substr(contextStart, contextLength), scopeAt(position, key) });
+        }
+
+        // Only sibling scalar properties can supply a modifier. Building a
+        // small normalized context also excludes comments and string contents.
+        for (const auto& value : assignments) {
+            const auto key = Lower(value.key);
+            if (key.contains("ctrl") || key.contains("control") || key.contains("shift") || key.contains("alt") ||
+                key == "combokey" || key == "modifierkeymkb" || key == "modifierbuttongamepad") {
+                const auto raw = Lower(Trim(value.raw));
+                const bool literal = raw == "true" || raw == "false" || raw == "yes" || raw == "no" ||
+                    raw == "on" || raw == "off" || std::ranges::all_of(raw, [](unsigned char c) {
+                        return std::isxdigit(c) || c == 'x' || c == '-' || c == '+';
+                    });
+                if (literal) modifierContexts[value.scope] += value.key + "=" + raw + '\n';
+            }
         }
 
         std::vector<CompoundMember> compoundMembers;
@@ -1010,6 +1044,7 @@ namespace UHI::Scanners
         std::unordered_map<std::string, std::vector<std::size_t>> compoundFamilies;
         for (std::size_t index = 0; index < assignments.size(); ++index) {
             compoundMembers.push_back(compoundMember(assignments[index].key));
+            compoundMembers.back().family += '\x1F' + assignments[index].scope;
             if (compoundMembers.back().role != CompoundRole::none)
                 compoundFamilies[compoundMembers.back().family].push_back(index);
         }
@@ -1153,7 +1188,7 @@ namespace UHI::Scanners
                 }
                 // Bump whenever parsing/detection semantics change so an old
                 // negative result cannot hide a newly supported binding form.
-                const auto tag = "config-v16-generic-compound-" + fallbackTag;
+                const auto tag = "config-v17-scoped-modifiers-" + fallbackTag;
                 if (cache) {
                     if (auto cached = cache->Find(tag, source)) {
                         perFile[index] = std::move(*cached);
@@ -1166,27 +1201,25 @@ namespace UHI::Scanners
                 try {
                     std::ifstream input(source, std::ios::binary);
                     if (input) {
-                        // Most non-setting JSON/XML/INI resources can be rejected
-                        // from a small prefix. Read the complete file only when
-                        // that prefix contains a binding-shaped setting name.
-                        constexpr std::size_t kProbeBytes = 256U * 1024U;
-                        std::string probe(kProbeBytes, '\0');
-                        input.read(probe.data(), static_cast<std::streamsize>(probe.size()));
-                        probe.resize(static_cast<std::size_t>(input.gcount()));
+                        // Candidate extensions/paths and file size were already
+                        // bounded. Inspect the whole file once: a prefix-only
+                        // negative cache permanently hid bindings near its end.
+                        const std::string bytes((std::istreambuf_iterator<char>(input)), {});
                         {
                             std::scoped_lock lock(progressMutex);
                             ReportItemProgress(itemProgress, source, finished.load(), candidates.size(), 35.0F);
                         }
-                        if (IsDedicatedBindingName(UHI::PathToUtf8(source.stem())) || MayContainBinding(probe)) {
-                            input.clear();
-                            input.seekg(0, std::ios::beg);
-                            const std::string bytes((std::istreambuf_iterator<char>(input)), {});
+                        if (IsDedicatedBindingName(UHI::PathToUtf8(source.stem())) || MayContainBinding(bytes)) {
                             {
                                 std::scoped_lock lock(progressMutex);
                                 ReportItemProgress(itemProgress, source, finished.load(), candidates.size(), 65.0F);
                             }
                             const auto text = DecodeText(std::span<const char>(bytes.data(), bytes.size()));
                             perFile[index] = ScanContent(source, text, {}, numericFallback);
+                            // The writer preserves UTF-8 bytes; it does not
+                            // re-encode UTF-16 documents. Advertise that limit.
+                            if (bytes.find('\0') != std::string::npos)
+                                for (auto& record : perFile[index]) record.editable = false;
                         }
                         {
                             std::scoped_lock lock(progressMutex);

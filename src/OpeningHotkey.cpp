@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <optional>
@@ -74,7 +75,8 @@ namespace
         value = Trim(std::move(value));
         float result{};
         const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
-        if (value.empty() || error != std::errc{} || end != value.data() + value.size()) return std::nullopt;
+        if (value.empty() || error != std::errc{} || end != value.data() + value.size() ||
+            !std::isfinite(result)) return std::nullopt;
         return result;
     }
 
@@ -124,6 +126,7 @@ namespace UHI
 {
     bool IsValidOpeningHotkey(const OpeningHotkey& hotkey) noexcept
     {
+        if (!std::isfinite(hotkey.uiScale) || !std::isfinite(hotkey.windowOpacity)) return false;
         // A modifier cannot be the base key: it would make exact modifier
         // matching ambiguous when the same event updates its held state.
         if (hotkey.scanCode == 0x1D || hotkey.scanCode == 0x9D ||
@@ -185,7 +188,10 @@ namespace UHI
             std::ifstream input(path);
             if (!input) return result;
             bool inGeneral = false;
+            bool firstLine = true;
             for (std::string line; std::getline(input, line);) {
+                if (firstLine && line.starts_with("\xEF\xBB\xBF")) line.erase(0, 3);
+                firstLine = false;
                 line = Trim(std::move(line));
                 if (line.empty() || line.starts_with(';') || line.starts_with('#')) continue;
                 if (line.front() == '[' && line.back() == ']') {

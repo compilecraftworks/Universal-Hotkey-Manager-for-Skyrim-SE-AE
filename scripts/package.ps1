@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '1.1.0',
+    [string]$Version = '1.1.1',
     [string]$BuildDirectory = 'build/skse',
     [string]$OutputDirectory = 'releases'
 )
@@ -16,7 +16,7 @@ $sourceStage = Join-Path $stagingRoot 'source'
 $dllSource = Join-Path $buildRoot 'UniversalHotkeyManager.dll'
 
 foreach ($path in @($buildRoot, $outputRoot, $stagingRoot, $releaseStage, $sourceStage)) {
-    if (-not $path.StartsWith($projectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if (-not $path.StartsWith($projectRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Packaging path escapes the project directory: $path"
     }
 }
@@ -122,7 +122,13 @@ $checksums = $hashes | ForEach-Object {
     '{0}  {1}' -f $_.Hash, (Split-Path -Leaf $_.Path)
 }
 $checksumPath = Join-Path $outputRoot 'SHA256SUMS.txt'
-[System.IO.File]::WriteAllLines($checksumPath, $checksums, [System.Text.UTF8Encoding]::new($false))
+$archiveNames = @($hashes | ForEach-Object { Split-Path -Leaf $_.Path })
+$previousChecksums = if (Test-Path -LiteralPath $checksumPath) {
+    @(Get-Content -LiteralPath $checksumPath | Where-Object {
+        $_ -match '^([A-Fa-f0-9]{64})  (.+)$' -and $Matches[2] -notin $archiveNames
+    })
+} else { @() }
+[System.IO.File]::WriteAllLines($checksumPath, @($previousChecksums) + @($checksums), [System.Text.UTF8Encoding]::new($false))
 
 Remove-Item -LiteralPath $stagingRoot -Recurse -Force
 

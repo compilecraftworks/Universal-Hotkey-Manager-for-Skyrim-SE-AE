@@ -85,13 +85,11 @@ namespace UHI::RuntimeAPI
 
 UHM_API bool UniversalHotkeyManager_Open()
 {
-    if (UHI::IsMenuFrameworkWindowOpen()) return true;
     return QueueMenuRequest(MenuRequest::open);
 }
 
 UHM_API void UniversalHotkeyManager_Close()
 {
-    if (!UHI::IsMenuFrameworkWindowOpen() && g_pendingRequest.load() != MenuRequest::open) return;
     static_cast<void>(QueueMenuRequest(MenuRequest::close));
 }
 

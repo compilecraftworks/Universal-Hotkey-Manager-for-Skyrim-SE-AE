@@ -763,7 +763,7 @@ namespace UHI::NativeImGuiHost
     bool Open()
     {
         if (!IsReady()) return false;
-        if (!g_menuLifecycle.IsOpen()) return QueueVisibility(true);
+        if (!g_menuLifecycle.WantsOpen()) return QueueVisibility(true);
         return true;
     }
 

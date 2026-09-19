@@ -230,7 +230,7 @@ namespace UHI
             // v12 changes detection semantics, not the serialized record. Keep
             // v11 binding history readable while invalidating stale scan views.
             if (!input || magic != kMagic || !Read(input, schema) ||
-                (schema != kSchemaVersion && !(schema == 11 && !validateFingerprints)) ||
+                (schema != kSchemaVersion && !((schema == 11 || schema == 12) && !validateFingerprints)) ||
                 !Read(input, count) || count > Registry::kDefaultMaxRecords) return std::nullopt;
             std::vector<HotkeyRecord> records;
             records.reserve(count);

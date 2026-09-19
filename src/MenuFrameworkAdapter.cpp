@@ -1,5 +1,6 @@
 #include "UHI/MenuFrameworkAdapter.h"
 #include "UHI/BindingHistory.h"
+#include "UHI/BindingIdentity.h"
 #include "UHI/EscapeCloseGuard.h"
 #include "UHI/BindingSerializer.h"
 #include "UHI/Registry.h"
@@ -285,9 +286,7 @@ namespace
 
     std::string ActionIdentity(const UHI::HotkeyRecord& record)
     {
-        return UHI::PathToUtf8(record.evidencePath) + '\x1F' +
-            std::to_string(record.evidenceLine) + '\x1F' + record.detector + '\x1F' +
-            record.settingSection + '\x1F' + record.settingName + '\x1F' + record.rawBinding;
+        return UHI::BindingSourceIdentity(record);
     }
 
     void EnsureActionOverridesLoaded()
@@ -303,7 +302,7 @@ namespace
             const auto key = HexDecode(std::string_view(line).substr(0, equals));
             const auto value = HexDecode(std::string_view(line).substr(equals + 1U));
             if (key && value && !key->empty() && !value->empty()) {
-                g_actionNameOverrides.insert_or_assign(*key, *value);
+                g_actionNameOverrides.insert_or_assign(UHI::MigrateActionIdentity(*key), *value);
             }
         }
     }
@@ -2353,7 +2352,7 @@ namespace
         ImGui::TableHeadersRow();
 
         const auto peerValues = [](const UHI::HotkeyViewEntry& item, const bool owners) {
-            const auto& peers = item.confirmedPeers.empty() ? item.conditionalPeers : item.confirmedPeers;
+            const auto peers = item.Peers();
             std::vector<std::string> values;
             values.reserve(peers.size());
             for (const auto* peer : peers) {
@@ -3900,9 +3899,13 @@ namespace UHI
         snapshot->registry = std::move(registry);
         snapshot->restored = restored;
         if (snapshot->registry) {
-            snapshot->groups = BuildHotkeyView(*snapshot->registry, true);
-            snapshot->conflictCount = snapshot->registry->Conflicts().size();
-            snapshot->conditionalConflictCount = snapshot->registry->ConditionalConflictCount();
+            auto analysis = snapshot->registry->AnalyzeConflicts();
+            for (const auto& [key, group] : analysis.groups) {
+                (void)key;
+                snapshot->conflictCount += group.status == ConflictStatus::confirmed;
+                snapshot->conditionalConflictCount += group.status == ConflictStatus::conditional;
+            }
+            snapshot->groups = BuildHotkeyView(*snapshot->registry, std::move(analysis), true);
         }
         std::scoped_lock lock(g_registryMutex);
         g_registrySnapshot = std::move(snapshot);
@@ -3916,8 +3919,7 @@ namespace UHI
 
     bool OpenMenuFrameworkWindow()
     {
-        if (IsMenuFrameworkWindowOpen()) return true;
-        g_automaticRefreshRequestedForCurrentOpen = false;
+        if (!IsMenuFrameworkWindowOpen()) g_automaticRefreshRequestedForCurrentOpen = false;
         g_focusWindowOnNextRender = true;
         if (!NativeImGuiHost::Open()) {
             g_focusWindowOnNextRender = false;

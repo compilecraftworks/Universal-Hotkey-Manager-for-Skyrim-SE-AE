@@ -1,5 +1,6 @@
 #include "UHI/writers/ConfigFileWriter.h"
 #include "UHI/JsonConfigDocument.h"
+#include "UHI/TextConfigScope.h"
 
 #include <algorithm>
 #include <cctype>
@@ -62,7 +63,7 @@ namespace
         return std::string::npos;
     }
 
-    bool ReplaceValue(std::string& content, const std::size_t lineNumber,
+    bool ReplaceValue(std::string& content, std::size_t lineNumber,
         const std::string_view settingName, const std::string_view expectedRaw,
         const std::string_view newRaw, const bool jsonSyntax, const std::string_view settingSection,
         std::string* readValue = nullptr)
@@ -82,6 +83,11 @@ namespace
             if (!UHI::JsonConfigDocument(replacement).Valid()) return false;
             content = std::move(replacement);
             return true;
+        }
+        if (!settingSection.empty()) {
+            const auto target = UHI::TextConfigScope(content).FindSettingLine(settingName, settingSection);
+            if (!target) return false;
+            lineNumber = *target;
         }
         std::size_t lineStart{};
         for (std::size_t line = 1; line < lineNumber; ++line) {

@@ -8,7 +8,30 @@ namespace UHI
 {
     std::vector<HotkeyViewGroup> BuildHotkeyView(const Registry& registry, const bool includeUiLocal)
     {
-        const auto analysis = registry.AnalyzeConflicts();
+        return BuildHotkeyView(registry, registry.AnalyzeConflicts(), includeUiLocal);
+    }
+
+    std::vector<const HotkeyRecord*> HotkeyViewEntry::Peers() const
+    {
+        std::vector<const HotkeyRecord*> peers;
+        if (!record || !registry || !peerGroup || (!conflict && !conditionalConflict)) return peers;
+        const auto wanted = conflict ? ConflictStatus::confirmed : ConflictStatus::conditional;
+        for (const auto index : peerGroup->indices) {
+            const auto& peer = registry->Records()[index];
+            if (PairConflictStatus(*record, peer) == wanted) peers.push_back(&peer);
+        }
+        return peers;
+    }
+
+    std::vector<HotkeyViewGroup> BuildHotkeyView(const Registry& registry,
+        ConflictAnalysis analysis, const bool includeUiLocal)
+    {
+        std::vector<std::shared_ptr<const ConflictGroup>> peersByRecord(registry.Records().size());
+        for (auto& [key, group] : analysis.groups) {
+            (void)key;
+            auto shared = std::make_shared<ConflictGroup>(std::move(group));
+            for (const auto index : shared->indices) peersByRecord[index] = shared;
+        }
 
         std::vector<HotkeyViewGroup> groups;
         std::unordered_set<std::string> displayed;
@@ -40,24 +63,14 @@ namespace UHI
                 groups.push_back({ .device = record.device });
                 group = std::prev(groups.end());
             }
-            std::vector<const HotkeyRecord*> confirmedPeers;
-            std::vector<const HotkeyRecord*> conditionalPeers;
-            confirmedPeers.reserve(analysis.confirmedPeers[recordIndex].size());
-            conditionalPeers.reserve(analysis.conditionalPeers[recordIndex].size());
-            for (const auto peer : analysis.confirmedPeers[recordIndex]) {
-                confirmedPeers.push_back(&registry.Records()[peer]);
-            }
-            for (const auto peer : analysis.conditionalPeers[recordIndex]) {
-                conditionalPeers.push_back(&registry.Records()[peer]);
-            }
             group->entries.push_back({
                 .record = &record,
                 .displayBinding = CompactBindingLabel(record.binding),
                 .category = ClassifyHotkey(record),
                 .conflict = analysis.recordStatus[recordIndex] == ConflictStatus::confirmed,
                 .conditionalConflict = analysis.recordStatus[recordIndex] == ConflictStatus::conditional,
-                .confirmedPeers = std::move(confirmedPeers),
-                .conditionalPeers = std::move(conditionalPeers)
+                .registry = &registry,
+                .peerGroup = peersByRecord[recordIndex]
             });
             ++recordIndex;
         }

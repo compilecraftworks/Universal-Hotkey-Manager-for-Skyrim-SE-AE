@@ -19,7 +19,7 @@ namespace UHI
     public:
         // Bump whenever scanner interpretation changes so an older negative
         // cache cannot hide newly supported bindings (for example F2/F4/F8).
-        static constexpr std::uint32_t kSchemaVersion = 9;
+        static constexpr std::uint32_t kSchemaVersion = 10;
 
         explicit ScanCache(std::filesystem::path path);
         void Load() noexcept;

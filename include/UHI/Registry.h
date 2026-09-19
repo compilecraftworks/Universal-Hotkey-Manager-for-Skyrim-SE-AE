@@ -28,9 +28,10 @@ namespace UHI
     {
         std::unordered_map<std::string, ConflictGroup> groups;
         std::vector<ConflictStatus> recordStatus;
-        std::vector<std::vector<std::size_t>> confirmedPeers;
-        std::vector<std::vector<std::size_t>> conditionalPeers;
     };
+
+    [[nodiscard]] ConflictStatus PairConflictStatus(const HotkeyRecord& left,
+        const HotkeyRecord& right) noexcept;
 
     class Registry
     {

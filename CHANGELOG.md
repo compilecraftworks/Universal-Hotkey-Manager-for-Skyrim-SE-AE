@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.1 - 2026-09-19
+
+- Require matching MCM ownership before writing a live property, global or array element. Accept SkyUI's valid keymap option ID 0 when its page and option type are verified.
+- Re-resolve INI/TOML settings by section and key before editing, preserving the expected-value guard after line moves. Refuse duplicate targets within the same section.
+- Keep modifier flags and compound key fields within their JSON object, INI/TOML section or YAML parent. Preserve separately stored modifiers in rebind previews; unsupported modifier changes are refused before writing.
+- Discover bindings beyond the former 256 KiB prefix and newly added settings during incremental refresh. Refresh live bindings once after loading a save, using unchanged-file caches and waiting for any cancelled scan to finish.
+- Replace quadratic conflict-peer storage with shared groups and on-demand peer lists. Keep every conflict entry and peer available, and reuse one analysis when publishing a view.
+- Keep UTF-16 configuration bindings visible while correctly marking their unsupported writer as read-only.
+- Preserve JSON backup identity after formatting changes and custom action names after rebinding. Migrate 1.1.0 name overrides and retain 1.0.9/1.1.0 binding history.
+- Honor UTF-8 BOMs in UHM's own INI and reject non-finite scale/opacity values.
+- Honor the last external open/close request when requests arrive before UI dispatch, including close followed immediately by open.
+- Fix localized MSVC/Ninja header dependency tracking so incremental builds cannot silently mix old and new data layouts. Add regression and allocation checks for the above paths; retain the existing popup, input-release and Windows font checks.
+
 ## 1.1.0 - 2026-09-19
 
 - Fix save-file deletion incorrectly putting UHM into a loading state that blocked scans and binding changes until another load.

@@ -13,10 +13,10 @@ namespace UHI
     class LastScanStore
     {
     public:
-        // v12 invalidates pre-path JSON scan identities. The binary record
-        // layout is unchanged from v11, which remains readable for history.
+        // v13 invalidates old modifier scopes and editability flags. The binary
+        // record layout is unchanged from v11/v12, still readable for history.
         // Keep restored UI snapshots in lockstep with scanner/cache semantics.
-        static constexpr std::uint32_t kSchemaVersion = 12;
+        static constexpr std::uint32_t kSchemaVersion = 13;
 
         [[nodiscard]] bool Save(const std::filesystem::path& path,
             std::span<const HotkeyRecord> records) const noexcept;

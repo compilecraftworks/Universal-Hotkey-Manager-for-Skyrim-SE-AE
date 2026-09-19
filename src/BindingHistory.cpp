@@ -1,4 +1,5 @@
 #include "UHI/BindingHistory.h"
+#include "UHI/BindingIdentity.h"
 #include "UHI/LastScanStore.h"
 #include "UHI/writers/ConfigFileWriter.h"
 #include <fstream>
@@ -9,9 +10,8 @@ namespace UHI
 {
     bool SameBindingSource(const HotkeyRecord& left, const HotkeyRecord& right)
     {
-        return left.evidencePath == right.evidencePath && left.evidenceLine == right.evidenceLine &&
-            left.settingName == right.settingName && left.settingSection == right.settingSection &&
-            left.device == right.device && left.detector == right.detector && left.action == right.action;
+        return BindingSourceIdentity(left) == BindingSourceIdentity(right) &&
+            left.device == right.device && left.action == right.action;
     }
 
     std::vector<BindingChange> LoadBindingHistory(const std::filesystem::path& path)

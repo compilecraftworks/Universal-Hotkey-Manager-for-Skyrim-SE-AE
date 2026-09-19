@@ -62,6 +62,8 @@ namespace
     // Live Papyrus/VM objects are invalidated while a game is reverting or a
     // save is being loaded.  UHM must never enumerate them during that window.
     std::atomic_bool g_gameTransitioning{ false };
+    std::atomic_uint64_t g_runtimeGeneration{ 0 };
+    std::atomic_bool g_loadRefreshPending{ false };
     // kDataLoaded is early enough for forms and the Papyrus MCM to exist, but
     // on SE 1.5.97 it is still too early to safely walk ControlMap and VM
     // objects.  Enable live/runtime collection only from a task queued after
@@ -594,13 +596,13 @@ namespace
     {
         g_scanPercent = success ? 100.0F : 0.0F;
         g_scanFilePercent = success ? 100.0F : 0.0F;
-        g_scanRunning = false;
         {
             std::scoped_lock lock(g_scanStageMutex);
             g_scanStage.assign(message);
             g_scanPath.clear();
         }
         UHI::SetMenuFrameworkScanStatus(false, g_scanPercent.load(), g_scanFilePercent.load(), message, "");
+        g_scanRunning = false;
     }
 
     std::vector<UHI::HotkeyRecord> CaptureSexLabRuntimeHotkeys(const std::filesystem::path& gameRoot)
@@ -890,7 +892,18 @@ namespace
             if (!canonical.contains("oid") && !canonical.starts_with("set") &&
                 !canonical.contains("option")) return;
             const auto value = variable->GetSInt();
-            if (value <= 0) return;
+            if (value < 0) return;
+            if (value == 0) {
+                // SkyUI's first option on page zero is a valid ID of zero.
+                // Distinguish it from an uninitialized OID using the actual
+                // page buffer (KEYMAP = 7 in the low byte of option flags).
+                const auto* page = FindScriptVariable(root, "currentpagenum");
+                const auto* flags = FindScriptVariable(root, "optionflagsbuf");
+                if (!page || !page->IsInt() || page->GetSInt() != 0 || !flags || !flags->IsArray()) return;
+                const auto array = flags->GetArray();
+                if (!array || array->size() == 0 || !(*array)[0].IsInt() ||
+                    ((*array)[0].GetSInt() & 0xFF) != 7) return;
+            }
             const auto candidateStem = McmOptionStem(name);
             int score{};
             if (!settingStem.empty() && candidateStem == settingStem) score = 120;
@@ -1028,16 +1041,20 @@ namespace
                             int score = settingScore + (scriptMatches ? 45 : 0) + (ownerMatches ? 35 : 0);
                             if (!targetSection.empty() && !currentSection.empty() && targetSection == currentSection)
                                 score += 20;
-                            if (settingScore != 0 && variable->IsInt()) {
+                            // A name match never establishes ownership. Loose
+                            // config mirrors and stale live records must not
+                            // reach another mod's identically named setting.
+                            const bool owned = scriptMatches || ownerMatches;
+                            if (owned && settingScore != 0 && variable->IsInt()) {
                                 targets.push_back({ variable, nullptr, root, variable->GetSInt(), score,
                                     std::string(name) });
-                            } else if (settingScore != 0 && variable->IsObject()) {
+                            } else if (owned && settingScore != 0 && variable->IsObject()) {
                                 if (auto* global = variable->Unpack<RE::TESGlobal*>()) {
                                     targets.push_back({ nullptr, global, root,
                                         static_cast<std::int32_t>(std::lround(global->value)), score,
                                         std::string(name) });
                                 }
-                            } else if (variable->IsArray()) {
+                            } else if (owned && variable->IsArray()) {
                                 const auto array = variable->GetArray();
                                 if (!array) return;
                                 for (std::uint32_t index = 0; index < array->size(); ++index) {
@@ -1837,8 +1854,10 @@ namespace
             FinishScan(false, "Unable to start scan worker");
             return;
         }
-        tasks->AddTask([currentSaveName = std::move(currentSaveName), automatic]() mutable {
-            if (g_gameTransitioning.load()) {
+        const auto generation = g_runtimeGeneration.load();
+        tasks->AddTask([currentSaveName = std::move(currentSaveName), automatic, generation]() mutable {
+            if (g_gameTransitioning.load() || g_scanCancelRequested.load() ||
+                generation != g_runtimeGeneration.load()) {
                 FinishScan(false, "Waiting for game load");
                 return;
             }
@@ -1935,7 +1954,7 @@ namespace
 
     void PumpBindingWrites()
     {
-        if (!g_mcmWritePending.load() && g_bindingRescanDue.load() == 0) return;
+        if (!g_mcmWritePending.load() && g_bindingRescanDue.load() == 0 && !g_loadRefreshPending.load()) return;
         static std::uint64_t nextPoll{}; // accessed only by the existing poll thread
         const auto now = GetTickCount64();
         if (now < nextPoll || g_bindingMaintenanceQueued.exchange(true)) return;
@@ -1944,6 +1963,10 @@ namespace
             tasks->AddTask([] {
                 try {
                     FinishPendingMcmWrite(g_gameTransitioning.load());
+                    if (!g_gameTransitioning.load() && g_runtimeCaptureReady.load() &&
+                        !g_scanRunning.load() && g_loadRefreshPending.exchange(false)) {
+                        StartScan(true);
+                    }
                     const auto due = g_bindingRescanDue.load();
                     if (due != 0 && GetTickCount64() >= due) {
                         g_bindingRescanDue = 0;
@@ -2224,6 +2247,8 @@ namespace
         }
         if (UHI::BeginsGameTransition<SKSE::MessagingInterface>(message->type)) {
             g_gameTransitioning = true;
+            ++g_runtimeGeneration;
+            g_loadRefreshPending = false;
             g_runtimeCaptureReady = false;
             FinishPendingMcmWrite(true);
             g_bindingRescanDue = 0;
@@ -2266,10 +2291,16 @@ namespace
             const bool notifyChanged = message->type == SKSE::MessagingInterface::kPostLoadGame &&
                 g_hasValidatedScanSnapshot.load();
             if (const auto* tasks = SKSE::GetTaskInterface()) {
-                tasks->AddTask([notifyChanged] {
-                    if (g_gameTransitioning.load()) return;
+                const auto generation = g_runtimeGeneration.load();
+                tasks->AddTask([notifyChanged, generation] {
+                    if (g_gameTransitioning.load() || generation != g_runtimeGeneration.load()) return;
                     g_runtimeCaptureReady = true;
                     RefreshPublishedRuntimeGameControls(notifyChanged);
+                    // Enumeration discovers new files; unchanged positive and
+                    // negative entries reuse the per-file cache. Capture the
+                    // loaded save's live MCM values once, even if disk files
+                    // did not change. A cancelled old worker must finish first.
+                    if (g_hasValidatedScanSnapshot.load()) g_loadRefreshPending = true;
                 });
             } else {
                 SKSE::log::warn("Runtime hotkey collection deferred: task interface unavailable");
@@ -2281,20 +2312,6 @@ namespace
             message->type == SKSE::MessagingInterface::kNewGame) {
             RegisterInputSink();
             StartOpeningHotkeyPoll();
-        }
-        if (message->type == SKSE::MessagingInterface::kPostLoadGame &&
-            g_hasValidatedScanSnapshot.load() && !g_scanRunning.load()) {
-            // A restored snapshot already carries fingerprints for its source
-            // files. Revalidate those inexpensive metadata fingerprints after
-            // loading a save and run the incremental scanner only when one of
-            // them actually changed. Opening UHM then remains instant and does
-            // not present a redundant 0-100% scan on every load.
-            if (UHI::LastScanStore{}.Load(LastScanPath()).has_value()) {
-                SKSE::log::info("Save load retained the validated hotkey snapshot; automatic scan skipped");
-            } else {
-                SKSE::log::info("Save load found changed hotkey evidence; starting incremental scan");
-                StartScan(true);
-            }
         }
     }
 

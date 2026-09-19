@@ -47,6 +47,7 @@ namespace UHI
         }
 
         bool IsOpen() const noexcept { return (state_.load() & kFlags) != 0U; }
+        bool WantsOpen() const noexcept { return (state_.load() & kRequested) != 0U; }
         bool CanRender() const noexcept { return (state_.load() & kFlags) == kFlags; }
         Ticket Revision() const noexcept { return state_.load() & ~kFlags; }
         bool IsCurrent(Ticket ticket) const noexcept { return Revision() == ticket; }

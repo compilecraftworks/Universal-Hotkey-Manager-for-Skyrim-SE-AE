@@ -2,6 +2,10 @@
 #include "UHI/PathEncoding.h"
 
 #include <cstdint>
+#include <algorithm>
+#include <array>
+#include <map>
+#include <tuple>
 
 namespace UHI
 {
@@ -123,6 +127,12 @@ namespace UHI
         }
     }
 
+    ConflictStatus PairConflictStatus(const HotkeyRecord& left, const HotkeyRecord& right) noexcept
+    {
+        if (left.owner == right.owner && left.action == right.action) return ConflictStatus::none;
+        return PairStatus(left, right);
+    }
+
     Registry::Registry(const std::size_t maxRecords) noexcept :
         maxRecords_(maxRecords)
     {}
@@ -186,8 +196,6 @@ namespace UHI
     {
         ConflictAnalysis analysis;
         analysis.recordStatus.resize(records_.size(), ConflictStatus::none);
-        analysis.confirmedPeers.resize(records_.size());
-        analysis.conditionalPeers.resize(records_.size());
         std::unordered_map<std::string, std::vector<std::size_t>> grouped;
         for (std::size_t index = 0; index < records_.size(); ++index) {
             if (!records_[index].runtimeActive || !records_[index].conflictEligible || records_[index].uiLocalOnly) {
@@ -205,29 +213,34 @@ namespace UHI
             return semanticActions.size() < 2;
         });
         for (auto& [key, indices] : grouped) {
-            ConflictStatus groupStatus = ConflictStatus::none;
-            for (std::size_t leftIndex = 0; leftIndex < indices.size(); ++leftIndex) {
-                for (std::size_t rightIndex = leftIndex + 1; rightIndex < indices.size(); ++rightIndex) {
-                    const auto left = indices[leftIndex];
-                    const auto right = indices[rightIndex];
-                    if (records_[left].owner == records_[right].owner &&
-                        records_[left].action == records_[right].action) continue;
-                    const auto status = PairStatus(records_[left], records_[right]);
-                    if (status == ConflictStatus::confirmed) {
-                        analysis.confirmedPeers[left].push_back(right);
-                        analysis.confirmedPeers[right].push_back(left);
-                    } else if (status == ConflictStatus::conditional) {
-                        analysis.conditionalPeers[left].push_back(right);
-                        analysis.conditionalPeers[right].push_back(left);
-                    }
-                    if (static_cast<unsigned>(status) > static_cast<unsigned>(analysis.recordStatus[left])) {
-                        analysis.recordStatus[left] = status;
-                    }
-                    if (static_cast<unsigned>(status) > static_cast<unsigned>(analysis.recordStatus[right])) {
-                        analysis.recordStatus[right] = status;
-                    }
-                    if (static_cast<unsigned>(status) > static_cast<unsigned>(groupStatus)) groupStatus = status;
+            // Context-equivalent records have the same pair result, except for
+            // duplicate semantic actions. Two distinct representatives per
+            // profile are enough to answer whether any peer conflicts.
+            using Profile = std::tuple<std::uint32_t, ContextConfidence, bool, std::string_view>;
+            std::map<Profile, std::array<std::size_t, 2>> profiles;
+            for (const auto index : indices) {
+                const auto& record = records_[index];
+                const bool controlMap = record.detector == "ControlMapScanner";
+                const Profile profile{record.contextMask, record.contextConfidence, controlMap,
+                    controlMap ? std::string_view(record.owner) : std::string_view{}};
+                const auto [it, inserted] = profiles.try_emplace(profile, std::array{index, index});
+                const auto& first = records_[it->second[0]];
+                if (!inserted && (first.owner != record.owner || first.action != record.action)) {
+                    it->second[1] = index;
                 }
+            }
+            ConflictStatus groupStatus = ConflictStatus::none;
+            for (const auto index : indices) {
+                auto& status = analysis.recordStatus[index];
+                for (const auto& [profile, representatives] : profiles) {
+                    (void)profile;
+                    for (const auto peer : representatives) {
+                        status = (std::max)(status, PairConflictStatus(records_[index], records_[peer]));
+                    }
+                    if (status == ConflictStatus::confirmed ||
+                        (status == ConflictStatus::conditional && records_[index].contextMask == 0)) break;
+                }
+                groupStatus = (std::max)(groupStatus, status);
             }
             if (groupStatus != ConflictStatus::none) {
                 analysis.groups.emplace(std::move(key), ConflictGroup{ std::move(indices), groupStatus });

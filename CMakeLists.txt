@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(UniversalHotkeyManager VERSION 1.1.0 LANGUAGES CXX)
+project(UniversalHotkeyManager VERSION 1.1.1 LANGUAGES CXX)
 
 find_package(ZLIB REQUIRED)
 find_package(lz4 CONFIG REQUIRED)
@@ -17,6 +17,25 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # active Windows ANSI code page or the optional system-wide UTF-8 locale flag.
 if(MSVC)
     add_compile_options(/utf-8)
+    if(CMAKE_GENERATOR MATCHES "Ninja")
+        # Capture the actual /showIncludes prefix without code-page conversion.
+        # VSLANG can fall back to Korean when the English language pack is not
+        # installed, so an English prefix must never be assumed. Ninja consumes
+        # the same raw bytes as this probe, including in direct incremental builds.
+        set(uhi_probe "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/uhi_header_probe")
+        file(WRITE "${uhi_probe}.h" "// Header dependency probe\n")
+        file(WRITE "${uhi_probe}.cpp" "#include \"uhi_header_probe.h\"\n")
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E env "VSLANG=1033"
+            "${CMAKE_CXX_COMPILER}" /nologo /showIncludes /c "${uhi_probe}.cpp" "/Fo${uhi_probe}.obj"
+            RESULT_VARIABLE uhi_probe_result OUTPUT_VARIABLE uhi_probe_output
+            ERROR_VARIABLE uhi_probe_error ENCODING NONE)
+        string(REGEX MATCH "([^\r\n]*: +)[^\r\n]*uhi_header_probe\\.h" uhi_probe_match "${uhi_probe_output}")
+        if(NOT uhi_probe_result EQUAL 0 OR NOT uhi_probe_match)
+            message(FATAL_ERROR "Cannot verify MSVC header dependency prefix: ${uhi_probe_output}${uhi_probe_error}")
+        endif()
+        set(CMAKE_CL_SHOWINCLUDES_PREFIX "${CMAKE_MATCH_1}")
+        list(PREPEND CMAKE_CXX_COMPILER_LAUNCHER "${CMAKE_COMMAND}" -E env "VSLANG=1033")
+    endif()
 endif()
 
 add_library(uhi_core STATIC
@@ -106,6 +125,42 @@ endif()
 
 if(UHI_BUILD_TESTS)
     enable_testing()
+    add_executable(uhi_conflict_resource_tests tests/ConflictResourceTests.cpp)
+    target_link_libraries(uhi_conflict_resource_tests PRIVATE uhi_core)
+    add_test(NAME uhi_conflict_resource_tests COMMAND uhi_conflict_resource_tests)
+    if(WIN32)
+        add_executable(uhi_runtime_api_queue_tests tests/RuntimeApiQueueTests.cpp src/RuntimeAPI.cpp)
+        target_include_directories(uhi_runtime_api_queue_tests PRIVATE tests/support/runtime include)
+        add_test(NAME uhi_runtime_api_queue_tests COMMAND uhi_runtime_api_queue_tests)
+        # Exercise the actual target-selection implementation with engine-only
+        # stand-ins. Regenerate when plugin.cpp changes; no copied algorithm.
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS src/plugin.cpp)
+        file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin.cpp" mcm_source)
+        set(mcm_impl "")
+        foreach(pair IN ITEMS "CanonicalMcmIdentifier|AppendRuntimeMcmValue" "PexScriptName|// Reads only already-registered SkyUI MCM objects.")
+            string(REPLACE "|" ";" markers "${pair}")
+            list(GET markers 0 first)
+            list(GET markers 1 last)
+            string(FIND "${mcm_source}" "    std::string ${first}(" begin)
+            if(last STREQUAL "AppendRuntimeMcmValue")
+                set(last "void ${last}(")
+            endif()
+            string(FIND "${mcm_source}" "    ${last}" end)
+            if(begin LESS 0 OR end LESS begin)
+                message(FATAL_ERROR "MCM regression extraction markers changed")
+            endif()
+            math(EXPR length "${end} - ${begin}")
+            string(SUBSTRING "${mcm_source}" ${begin} ${length} fragment)
+            string(APPEND mcm_impl "${fragment}")
+        endforeach()
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/McmImplementation.inc" "${mcm_impl}")
+        add_executable(uhi_mcm_target_tests tests/McmTargetTests.cpp)
+        target_include_directories(uhi_mcm_target_tests PRIVATE include "${CMAKE_CURRENT_BINARY_DIR}")
+        add_test(NAME uhi_mcm_target_tests COMMAND uhi_mcm_target_tests)
+    endif()
+    add_executable(uhi_precision_regression_tests tests/PrecisionRegressionTests.cpp)
+    target_link_libraries(uhi_precision_regression_tests PRIVATE uhi_core)
+    add_test(NAME uhi_precision_regression_tests COMMAND uhi_precision_regression_tests)
     add_executable(uhi_functional_regression_tests tests/FunctionalRegressionTests.cpp)
     target_link_libraries(uhi_functional_regression_tests PRIVATE uhi_core)
     add_test(NAME uhi_functional_regression_tests COMMAND uhi_functional_regression_tests)
