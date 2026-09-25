@@ -175,6 +175,7 @@ namespace
 
     bool BuildFontAtlas(ImGuiIO& io)
     {
+        SKSE::log::info("UHM renderer: building Windows UI font atlas");
         const auto fonts = UHI::BuildNativeFontAtlas(*io.Fonts);
         io.FontDefault = g_standardFont = fonts.standard;
         const auto preferences = UHI::LoadOpeningHotkey(std::filesystem::current_path() /

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(UniversalHotkeyManager VERSION 1.1.1 LANGUAGES CXX)
+project(UniversalHotkeyManager VERSION 1.1.2 LANGUAGES CXX)
 
 find_package(ZLIB REQUIRED)
 find_package(lz4 CONFIG REQUIRED)

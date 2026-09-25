@@ -26,6 +26,88 @@ namespace
         --liveBlocks;
         std::free(block);
     }
+
+    bool CheckCollectionDirectory()
+    {
+        std::array<unsigned char, 128> file{};
+        const auto write = [&](std::size_t offset, std::uint32_t value) {
+            for (unsigned i = 0; i < 4; ++i) file[offset + i] = static_cast<unsigned char>(value >> (24 - i * 8));
+        };
+        write(0, 0x74746366); write(4, 0x00010000); write(8, 2);
+        write(12, 24); write(16, 56);
+        for (const auto offset : {24U, 56U}) {
+            write(offset, 0x00010000); file[offset + 5] = 1;
+            write(offset + 12, 0x6E616D65); // name table, different for each face
+            write(offset + 20, offset + 72); write(offset + 24, 0);
+        }
+        const auto first = std::span<const unsigned char>(file).subspan(24, 28);
+        const auto second = std::span<const unsigned char>(file).subspan(56, 28);
+        using UHI::NativeFontDetail::FindSelectedFace;
+        bool ok = FindSelectedFace(file, first) == 0 && FindSelectedFace(file, second) == 1;
+        // The old table=0 slice retains collection-relative offsets.
+        ok = !FindSelectedFace(std::span<const unsigned char>(file).subspan(56), second) && ok;
+        ok = !FindSelectedFace(file, second.first(12)) && ok;
+        auto invalid = file;
+        invalid[16] = 0xFF; // out-of-file second face
+        ok = !FindSelectedFace(invalid, second) && ok;
+        invalid = file;
+        invalid[4] = 0xFF; // unsupported TTC version
+        ok = !FindSelectedFace(invalid, second) && ok;
+        invalid = file;
+        invalid[8] = 0xFF; // oversized face count
+        ok = !FindSelectedFace(invalid, second) && ok;
+        std::cout << "TTC face identity and truncated/invalid directory checks: " << ok << '\n';
+        return ok;
+    }
+
+    bool CheckWindowsFont(const wchar_t* face, bool collection)
+    {
+        LOGFONTW logical{};
+        logical.lfHeight = -16;
+        wcsncpy_s(logical.lfFaceName, face, _TRUNCATE);
+        const UHI::NativeFontDetail::GdiFontSelection selected(logical);
+        if (!selected.previous || selected.previous == HGDI_ERROR) return false;
+        // Independently compare the chosen face's name table with Windows' live
+        // selection. Merely loading TTC face zero would render the wrong font.
+        const auto nameSize = GetFontData(selected.dc, 0x656D616E, 0, nullptr, 0);
+        if (nameSize == GDI_ERROR || nameSize > 1024U * 1024U) return false;
+        std::vector<unsigned char> expected(nameSize);
+        if (GetFontData(selected.dc, 0x656D616E, 0, expected.data(), nameSize) != nameSize) return false;
+        const auto beforeBytes = liveBytes, beforeBlocks = liveBlocks;
+        const auto beforeGdi = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
+        bool ok = true;
+        int faceIndex = -1;
+        for (int cycle = 0; cycle < 5; ++cycle) {
+            ImGui::CreateContext();
+            auto& atlas = *ImGui::GetIO().Fonts;
+            auto* font = UHI::AddWindowsLogicalFont(atlas, logical);
+            bool nameMatches = false;
+            if (font && atlas.Sources.Size == 1) {
+                const auto& config = atlas.Sources[0];
+                faceIndex = config.FontNo;
+                const auto* bytes = static_cast<const unsigned char*>(config.FontData);
+                const auto read = UHI::NativeFontDetail::Read32;
+                const bool isCollection = read(bytes) == 0x74746366;
+                ok = ok && isCollection == collection;
+                const auto offset = isCollection ? read(bytes + 12 + config.FontNo * 4) : 0U;
+                const auto count = (unsigned{bytes[offset + 4]} << 8) | bytes[offset + 5];
+                for (unsigned i = 0; i < count; ++i) {
+                    const auto* table = bytes + offset + 12 + i * 16;
+                    if (read(table) == 0x6E616D65 && read(table + 12) == nameSize)
+                        nameMatches = std::memcmp(bytes + read(table + 8), expected.data(), nameSize) == 0;
+                }
+            }
+            ok = font && nameMatches && atlas.Build() && ok;
+            if (font) for (const auto code : {'A', '0', '+'})
+                ok = font->FindGlyphNoFallback(static_cast<ImWchar>(code)) && ok;
+            ImGui::DestroyContext();
+            ok = ok && liveBytes == beforeBytes && liveBlocks == beforeBlocks;
+            ok = ok && GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) == beforeGdi;
+        }
+        std::wcout << L"Windows face " << face << L", TTC=" << collection << L", index=" << faceIndex
+            << L", 5 build/free cycles=" << ok << L'\n';
+        return ok;
+    }
 }
 
 int main()
@@ -74,5 +156,21 @@ int main()
     }
     std::cout << "20 font/context cycles: retained bytes=" << liveBytes
               << ", baseline=" << retainedBytes << ", blocks=" << liveBlocks << '\n';
+    ok = CheckCollectionDirectory() && ok;
+    const auto directory = UHI::WindowsFontDirectory();
+    struct FontCase { const wchar_t* file; const wchar_t* face; bool collection; };
+    for (const auto& test : {
+             FontCase{L"segoeui.ttf", L"Segoe UI", false},
+             FontCase{L"malgun.ttf", L"Malgun Gothic", false},
+             FontCase{L"msyh.ttc", L"Microsoft YaHei", true},
+             FontCase{L"msyh.ttc", L"Microsoft YaHei UI", true},
+             FontCase{L"msjh.ttc", L"Microsoft JhengHei", true},
+             FontCase{L"msjh.ttc", L"Microsoft JhengHei UI", true},
+             FontCase{L"msgothic.ttc", L"MS Gothic", true},
+             FontCase{L"msgothic.ttc", L"MS UI Gothic", true},
+             FontCase{L"YuGothR.ttc", L"Yu Gothic UI", true}}) {
+        if (std::filesystem::exists(directory / test.file)) ok = CheckWindowsFont(test.face, test.collection) && ok;
+        else std::wcout << L"Font not installed, skipped: " << test.face << L'\n';
+    }
     return ok ? 0 : 1;
 }

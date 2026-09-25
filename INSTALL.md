@@ -1,4 +1,4 @@
-# Universal Hotkey Manager for Skyrim SE-AE 1.1.1 - Installation
+# Universal Hotkey Manager for Skyrim SE-AE 1.1.2 - Installation
 
 ## Requirements
 
@@ -13,7 +13,7 @@ The in-game interface defaults to automatic Windows-language detection and suppo
 
 ## Mod Organizer 2
 
-1. Install `Universal Hotkey Manager for Skyrim SE-AE 1.1.1.zip` as a normal mod.
+1. Install `Universal Hotkey Manager for Skyrim SE-AE 1.1.2.zip` as a normal mod.
 2. Enable Universal Hotkey Manager for Skyrim SE-AE after SKSE64 and Address Library.
 3. Start the game through SKSE.
 4. Press `Del` to open the manager, open **Options**, then press **Start full scan**.
@@ -30,9 +30,9 @@ To edit an installed loose controlmap through UHM, close Skyrim, back up and del
 
 ## Updating
 
-Exit Skyrim completely, then replace the previous UHM files with the files from the new release. Version 1.1.1 contains only the SKSE plugin, its INI and UI assets, and minimal license documentation; it does not create an ESP or load-order entry. Existing settings and binding history can be retained.
+Exit Skyrim completely, then replace the previous UHM files with the files from the new release. Version 1.1.2 contains only the SKSE plugin, its INI and UI assets, and minimal license documentation; it does not create an ESP or load-order entry. Existing settings and binding history can be retained.
 
-After upgrading to 1.1.1, run a scan from **Options** once to rebuild results with the corrected setting scopes and editability flags. The existing `.uhi.bak` files, custom action names and 1.0.9/1.1.0 binding history remain usable.
+When upgrading from 1.1.0 or earlier, run a scan from **Options** once to rebuild results with the corrected setting scopes and editability flags introduced in 1.1.1. The existing `.uhi.bak` files, custom action names and binding history remain usable. Updating from 1.1.1 to 1.1.2 does not require a rescan or a change to Windows language/font settings.
 
 ## Files
 

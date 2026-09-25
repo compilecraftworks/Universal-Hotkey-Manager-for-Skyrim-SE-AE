@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.2 - 2026-09-25
+
+- Fix a startup access violation in Windows UI font loading introduced in 1.0.7. Read complete TrueType collections and select the actual Windows font face, preserving collection-relative table offsets. Keep Windows default fonts and existing Korean/Chinese coverage.
+- Verify TTC face selection, invalid directory rejection, and repeated font allocation/GDI cleanup. Reproduced the old access violation with Microsoft JhengHei UI, MS UI Gothic and Yu Gothic UI; the corrected font path and all 31 regression tests pass. Confirmation against the reporter's game/crash logs is still needed.
+
 ## 1.1.1 - 2026-09-19
 
 - Require matching MCM ownership before writing a live property, global or array element. Accept SkyUI's valid keymap option ID 0 when its page and option type are verified.
